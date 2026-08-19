@@ -91,7 +91,7 @@ internal static class Program
                 if (launcher.Length > 0) detail += "DeepSeek Harness.exe 正在运行。\n";
                 if (runningNodes.Length > 0) detail += "dsh web 进程正在运行（PID " + string.Join(", ", runningNodes) + "）。\n";
                 return Fail("程序运行中", 1,
-                    "更新前请先退出 DeepSeek Harness：\n" + detail +
+                    "更新前请先退出正在运行的程序：\n" + detail +
                     "\n请从托盘图标选择“退出”，或关闭后重试。", "", s_diagLog);
             }
 
