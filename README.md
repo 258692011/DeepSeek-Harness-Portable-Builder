@@ -1,6 +1,6 @@
 # DeepSeek Harness Portable Builder
 
-此目录是本机 Portable 构建系统，**不是**官方 Git 仓库的一部分；官方源码只存放在 `upstream\` 子目录中。
+此目录是本机 Portable 构建系统，不是官方 Git 仓库的一部分；官方源码只存放在 `upstream\` 子目录中。
 
 本构建器将 [DeepSeek Harness (dsh)](https://github.com/deepseek-ai/deepseek-harness) 打包成免安装、可移动的 Windows x64 便携版：内嵌 Node.js 运行时 + 预构建的 dsh 应用，用户数据通过 `DSH_HOME` 重定向到包内 `data\dsh\`，整包可复制、移动。
 
@@ -16,7 +16,7 @@
 
 ## 构建机要求
 
-当前只支持 **Windows 10/11 x64**。构建机需要：
+当前只支持 Windows 10/11 x64。构建机需要：
 
 | 软件 | 版本要求 | 是否必须预装 | 说明 |
 |---|---|---:|---|
@@ -75,9 +75,9 @@ DeepSeek-Harness-Portable\
 └── README.txt             # 给最终用户的说明
 ```
 
-- **端口**：默认 `http://127.0.0.1:3080`（dsh 惯例端口）；被占用时启动器自动改用空闲端口
-- **自愈**：启动器每次启动删除 `data\dsh\profiles\node_modules`（symlink farm），dsh 启动时自动重建——便携包移动后无需任何手动修复
-- **数据随包走**：`data\dsh\` 内所有用户数据跟随目录移动
+- 端口：默认 `http://127.0.0.1:3080`（dsh 惯例端口）；被占用时启动器自动改用空闲端口
+- 自愈：启动器每次启动删除 `data\dsh\profiles\node_modules`（symlink farm），dsh 启动时自动重建——便携包移动后无需任何手动修复
+- 数据随包走：`data\dsh\` 内所有用户数据跟随目录移动
 
 ## 冒烟测试
 
@@ -94,16 +94,16 @@ DeepSeek-Harness-Portable\
 
 dsh 是 RC 阶段、破坏性变更频繁。升级分两种情况：
 
-**① 原地更新 dsh(推荐,不需重建)**
+① 原地更新 dsh(推荐,不需重建)
 双击包根目录的 `Update.exe`(无窗口,用包内自带 npm):
 - 读 `app\package.json` 当前版本 → 查 registry 最新版 → 确认 → 进度窗(显示版本 + 滚动条)→ `npm install @deepseek-ai/dsh@latest`(5 秒级)→ 自动重启 DeepSeek Harness.exe
 - 只动 `app\node_modules`,用户数据 `data\dsh\` 原样保留
 - 更新前检测 DeepSeek Harness.exe / 本包 node 进程,运行中会要求先退出
 - 失败时弹带 复制日志/关闭 按钮的对话框(日志: `data\dsh\logs\Update-exe-diagnostic.log`)
-- **托盘"检查更新"**:DeepSeek Harness.exe 托盘菜单可直接触发检查(只查版本,不必退出程序)
+- 托盘"检查更新":DeepSeek Harness.exe 托盘菜单可直接触发检查(只查版本,不必退出程序)
 - 注意:此方式不换 Node 运行时,也不更新启动器/图标
 
-**② 重新构建(当更新超出 dsh 本身时)**
+② 重新构建(当更新超出 dsh 本身时)
 当新版 dsh 提升 Node engines 要求、或需要换启动器/图标/README 时:同步 upstream → 重新构建 → 产出新 zip(`dist\` 按时间戳区分,旧归档可自行清理)。
 
 ## 相关
