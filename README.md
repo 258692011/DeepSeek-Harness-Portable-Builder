@@ -109,4 +109,3 @@ dsh 是 RC 阶段、破坏性变更频繁。升级分两种情况：
 ## 相关
 
 - 便携版运行机制细节、坑点清单见 Hermes skill：`deepseek-harness-portable-builder`
-- dsh 技能系统说明（发现根分层、格式要求、内置技能机制）见 [SKILLS.md](SKILLS.md)
