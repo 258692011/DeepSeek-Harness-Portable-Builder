@@ -83,12 +83,12 @@ internal static class Program
             // Refuse to update while the launcher or a dsh web process from
             // THIS portable is still running (files locked / half-updated tree).
             // --check mode is read-only, so it runs even with the app open.
-            Process[] launcher = Process.GetProcessesByName("DeepSeek-Harness");
+            Process[] launcher = Process.GetProcessesByName("DeepSeek Harness");
             string[] runningNodes = FindPortableNodeProcesses(s_root);
             if (!s_checkOnly && (launcher.Length > 0 || runningNodes.Length > 0))
             {
                 string detail = "";
-                if (launcher.Length > 0) detail += "DeepSeek-Harness.exe 正在运行。\n";
+                if (launcher.Length > 0) detail += "DeepSeek Harness.exe 正在运行。\n";
                 if (runningNodes.Length > 0) detail += "dsh web 进程正在运行（PID " + string.Join(", ", runningNodes) + "）。\n";
                 return Fail("程序运行中", 1,
                     "更新前请先退出 DeepSeek Harness：\n" + detail +
@@ -154,7 +154,7 @@ internal static class Program
             else if (s_checkOnly)
             {
                 MessageBox.Show("发现新版本：" + latest + "（当前 " + current + "）。\n\n" +
-                    "请先退出 DeepSeek-Harness.exe，然后双击 Update.exe 进行更新。",
+                    "请先退出 DeepSeek Harness.exe，然后双击 Update.exe 进行更新。",
                     "DeepSeek Harness Update", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return 0;
             }
@@ -229,15 +229,15 @@ internal static class Program
             string newVer = RunCapture(nodeExe, "\"" + dshEntry + "\" --version", appDir);
             newVer = newVer == null ? "?" : newVer.Trim();
             MessageBox.Show(
-                "更新完成：" + newVer + "\n\n正在重新启动 DeepSeek-Harness.exe...",
+                "更新完成：" + newVer + "\n\n正在重新启动 DeepSeek Harness.exe...",
                 "DeepSeek Harness Update", MessageBoxButtons.OK, MessageBoxIcon.Information);
             try
             {
-                Process.Start(Path.Combine(s_root, "DeepSeek-Harness.exe"));
+                Process.Start(Path.Combine(s_root, "DeepSeek Harness.exe"));
             }
             catch (Exception launchEx)
             {
-                MessageBox.Show("更新已完成，但无法自动启动 DeepSeek-Harness.exe：\n" + launchEx.Message + "\n\n请手动启动。",
+                MessageBox.Show("更新已完成，但无法自动启动 DeepSeek Harness.exe：\n" + launchEx.Message + "\n\n请手动启动。",
                     "DeepSeek Harness Update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
             return 0;

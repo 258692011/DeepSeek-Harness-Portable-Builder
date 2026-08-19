@@ -286,10 +286,13 @@ $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 if (-not (Test-Path $csc)) { throw "csc.exe not found: $csc" }
 $launcherIcon = Join-Path $Templates 'DeepSeek-Harness.ico'
 if (-not (Test-Path $launcherIcon)) { throw "Launcher icon missing: $launcherIcon" }
-Invoke-NativeChecked 'DeepSeek-Harness launcher compilation' {
-    & $csc /nologo /target:winexe /platform:anycpu /optimize+ "/win32icon:$launcherIcon" "/out:$Stage\DeepSeek-Harness.exe" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll (Join-Path $Templates 'DeepSeek-Harness.cs')
+# The launcher exe ships as "DeepSeek Harness.exe" (space, not hyphen): the
+# name users see in Explorer and in Update.exe's process checks.
+$launcherOut = Join-Path $Stage 'DeepSeek Harness.exe'
+Invoke-NativeChecked 'DeepSeek Harness launcher compilation' {
+    & $csc /nologo /target:winexe /platform:anycpu /optimize+ "/win32icon:$launcherIcon" "/out:`"$launcherOut`"" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll (Join-Path $Templates 'DeepSeek-Harness.cs')
 }
-if (-not (Test-Path (Join-Path $Stage 'DeepSeek-Harness.exe'))) { throw 'DeepSeek-Harness.exe was not produced.' }
+if (-not (Test-Path $launcherOut)) { throw 'DeepSeek Harness.exe was not produced.' }
 
 Copy-Item (Join-Path $Templates 'README.txt') (Join-Path $Stage 'README.txt') -Force
 

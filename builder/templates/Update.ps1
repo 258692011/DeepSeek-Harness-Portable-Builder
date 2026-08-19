@@ -1,4 +1,4 @@
-﻿param(
+param(
     # Root of the portable install. Defaults to this script's own directory so
     # the script can sit at the portable root and be run by double-click.
     [string]$PortableRoot = $PSScriptRoot,
@@ -32,12 +32,12 @@ foreach ($proc in (Get-CimInstance Win32_Process -Filter "Name='node.exe'" -Erro
         $running += $proc.ProcessId
     }
 }
-$launcher = Get-Process -Name 'DeepSeek-Harness' -ErrorAction SilentlyContinue
+$launcher = Get-Process -Name 'DeepSeek Harness' -ErrorAction SilentlyContinue
 if ($running.Count -gt 0 -or $launcher) {
     Write-Host 'ERROR: DeepSeek Harness is still running.' -ForegroundColor Red
     Write-Host 'Close it (tray icon -> 退出) before updating, then run this script again.' -ForegroundColor Yellow
     if ($running.Count -gt 0) { Write-Host ('  dsh web processes: ' + ($running -join ', ')) }
-    if ($launcher) { Write-Host ('  DeepSeek-Harness.exe PIDs: ' + (($launcher | ForEach-Object { $_.Id }) -join ', ')) }
+    if ($launcher) { Write-Host ('  DeepSeek Harness.exe PIDs: ' + (($launcher | ForEach-Object { $_.Id }) -join ', ')) }
     exit 1
 }
 
@@ -86,5 +86,5 @@ try {
 if (-not (Test-Path $dshEntry)) { throw "dsh entry missing after update: $dshEntry" }
 $newVer = & $nodeExe $dshEntry --version 2>&1 | Select-Object -Last 1
 Write-Host ("更新完成: " + ($newVer -replace '\s+', ' ').Trim()) -ForegroundColor Green
-Write-Host '请重启 DeepSeek-Harness.exe 使用新版本。' -ForegroundColor Cyan
+Write-Host '请重启 DeepSeek Harness.exe 使用新版本。' -ForegroundColor Cyan
 Write-Host '提示: 更新只动 app\node_modules;用户数据 (data\dsh\profiles 等) 原样保留。'

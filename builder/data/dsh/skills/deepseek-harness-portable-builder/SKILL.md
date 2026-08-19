@@ -16,7 +16,7 @@ metadata:
 
 Use when the user asks to sync/build/package the DeepSeek Harness portable
 (builder root `D:\DeepSeek-Harness-Portable-Builder`), rebuild after an
-upstream release, or debug the DeepSeek-Harness.exe launcher / portable layout.
+upstream release, or debug the DeepSeek Harness.exe launcher / portable layout.
 
 Builds a relocatable Windows x64 portable of **DeepSeek Harness (dsh)** — the
 pure-TypeScript agent harness (no Electron, no Python core). Product lives in
@@ -26,7 +26,7 @@ Portable layout (what ships):
 
 ```
 DeepSeek-Harness-Portable\
-├── DeepSeek-Harness.exe  # C# winexe launcher: no console window, tray icon, opens browser
+├── DeepSeek Harness.exe  # C# winexe launcher: no console window, tray icon, opens browser
 ├── node\          # portable Node v22.23.2 (zip from builder\assets\node)
 ├── app\           # @deepseek-ai/dsh installed with node-linker=hoisted (flat, symlink-free)
 ├── data\dsh\      # DSH_HOME: profiles/storages, created on first run (empty in release)
@@ -55,7 +55,7 @@ Script steps: assert upstream → wipe stage → Resolve-Node (**pinned v22.23.2
 own assets → exact-URL download if missing) → Resolve-Pnpm (**pinned 11.21.0**,
 builder cache only — never the system pnpm; bundled-npm install back-fills the
 cache) → pnpm add @deepseek-ai/dsh@<ver> (hoisted + official registry +
-allow-builds) → compile DeepSeek-Harness.exe (csc winexe + icon) → README
+allow-builds) → compile DeepSeek Harness.exe (csc winexe + icon) → README
 version injection → `dsh --version` via **node + lib\bin.js** (never the .cmd
 shim) → **web probe (HTTP 200, dynamically allocated port)** →
 **clear probe-generated data\dsh** → 7za archive → `7za t` verify.
@@ -111,8 +111,8 @@ upstream = read-only mirror of `https://github.com/deepseek-ai/deepseek-harness.
   "exists and is not a symlink" error on boot). Clear `data\dsh\*` BEFORE
   archiving (Remove-Item -Recurse is unreliable on junction trees → fall back
   to `subst` + `cmd /d /c rd /s /q`). Launcher self-heals on start anyway.
-- **Stale node/DeepSeek-Harness processes hold the stage**: before rebuild, kill
-  `node.exe` + `DeepSeek-Harness.exe` (a shell whose cwd sits inside stage also blocks
+- **Stale node/DeepSeek Harness processes hold the stage**: before rebuild, kill
+  `node.exe` + `DeepSeek Harness.exe` (a shell whose cwd sits inside stage also blocks
   deletion; `Remove-Item` from PowerShell with an explicit path works when
   bash rm fails). The web probe now also **kills its whole process tree**
   (`taskkill /PID <pid> /T /F`) instead of only the main PID, so a surviving
@@ -148,7 +148,7 @@ upstream = read-only mirror of `https://github.com/deepseek-ai/deepseek-harness.
   dialog shows "正在更新 dsh: <cur> → <latest>" with a marquee bar while npm
   runs** → `npm install @deepseek-ai/dsh@latest --registry=
   https://registry.npmjs.org/ --no-audit --no-fund` in `app\`; verifies via
-  `bin.js --version`; **auto-relaunches DeepSeek-Harness.exe** on success;
+  `bin.js --version`; **auto-relaunches DeepSeek Harness.exe** on success;
   user data `data\dsh` untouched (verified: works on the hoisted tree, ~5s,
   HTTP 200 after update).
 - **`npm view` failure is not a version**: RunCapture appends `[stderr]` when
@@ -160,7 +160,7 @@ upstream = read-only mirror of `https://github.com/deepseek-ai/deepseek-harness.
 - **Failure dialog is a custom Form with 复制日志/关闭 buttons** (copy = body
   + full diagnostic log to clipboard).
 - Re-entrancy marker `data\dsh\.dsh-update-in-progress` (PID, stale-safe);
-  refuses to run while DeepSeek-Harness.exe or a portable node web process
+  refuses to run while DeepSeek Harness.exe or a portable node web process
   is alive; diagnostic log `data\dsh\logs\Update-exe-diagnostic.log`.
 - Launcher tray menu: 打开 Web UI / **检查更新** (spawns Update.exe --check)
   / 退出.
@@ -220,8 +220,8 @@ would have shipped the old text). Rule: no patch is done until both copies match
 
 Extract to a fresh temp dir, then:
 1. `node\node.exe app\node_modules\@deepseek-ai\dsh\lib\bin.js --version` → version
-2. Run `DeepSeek-Harness.exe`, poll `http://127.0.0.1:3080/` → HTTP 200, `<title>DeepSeek Harness</title>`
+2. Run `DeepSeek Harness.exe`, poll `http://127.0.0.1:3080/` → HTTP 200, `<title>DeepSeek Harness</title>`
 3. `data\dsh\profiles\node_modules\@deepseek-ai` → ~195 junction entries (self-healed)
-4. Icon extractable from DeepSeek-Harness.exe (32x32).
+4. Icon extractable from DeepSeek Harness.exe (32x32).
 5. `7za t` the zip: "Everything is Ok"; `data\dsh` must contain ONLY the
    empty directory (no profiles/storages in the archive).
