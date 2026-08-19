@@ -1,0 +1,7 @@
+{
+  "name": "dsh-portable-app",
+  "private": true,
+  "version": "1.0.0",
+  "description": "DeepSeek Harness portable install context (hoisted node_modules)",
+  "license": "MIT"
+}
