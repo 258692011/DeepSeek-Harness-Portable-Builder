@@ -22,8 +22,8 @@
 |---|---|---:|---|
 | Windows PowerShell | 5.1（Windows 自带） | 是 | 构建入口运行环境 |
 | Git | 任意版本 | 是 | 构建脚本 `Assert-Upstream` 读取 `upstream\` 状态与提交号 |
-| pnpm | 固定 **11.21.0**（脚本 `$PnpmVersion`） | 否 | 安装 `@deepseek-ai/dsh` 发布包；**不用系统 pnpm**，用包内 npm 装固定版本并回填 `builder\assets\pnpm\` 缓存（全离线自包含） |
-| Node.js + npm | 构建机任意可用版本即可 | 否 | 打包进成品的 Node 运行时**不读取系统**，从 `builder\assets\node\` 缓存取，缺失才下载（下载后回填 assets 缓存）；包内 npm 仅用于装固定版 pnpm |
+| pnpm | 固定 **11.21.0**（脚本 `$PnpmVersion`） | 否 | 安装 `@deepseek-ai/dsh` 发布包；不用系统 pnpm，用包内 npm 装固定版本并回填 `builder\assets\pnpm\` 缓存（全离线自包含） |
+| Node.js + npm | 构建机任意可用版本即可 | 否 | 打包进成品的 Node 运行时不读取系统，从 `builder\assets\node\` 缓存取，缺失才下载（下载后回填 assets 缓存）；包内 npm 仅用于装固定版 pnpm |
 | .NET Framework C# 编译器 | v4.0（Windows 10/11 自带） | 是（系统组件） | 使用 `Framework64\v4.0.30319\csc.exe` 编译 `DeepSeek Harness.exe` 启动器 |
 | 7za.exe（7-Zip 命令行版） | 随仓库内置 `builder\assets\7zip\7za.exe`（当前 26.02） | 否 | 缺失时联网下载恢复（下载后回填 assets 缓存） |
 
