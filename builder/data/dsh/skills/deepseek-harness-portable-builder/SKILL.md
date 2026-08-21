@@ -232,5 +232,7 @@ Extract to a fresh temp dir, then:
 2. Run `DeepSeek Harness.exe`, poll `http://127.0.0.1:3080/` → HTTP 200, `<title>DeepSeek Harness</title>`
 3. `data\dsh\profiles\node_modules\@deepseek-ai` → ~195 junction entries (self-healed)
 4. Icon extractable from DeepSeek Harness.exe (32x32).
-5. `7za t` the zip: "Everything is Ok"; `data\dsh` must contain ONLY the
-   empty directory (no profiles/storages in the archive).
+5. `7za t` the zip: "Everything is Ok"; `data\dsh` contains ONLY preinstalled
+   content (`profiles\web\cordis.patch.yml` + the official scaffold files,
+   `skills\...`) — no probe-generated junction farm (`profiles\node_modules`)
+   and no `storages`.
