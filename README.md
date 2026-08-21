@@ -14,7 +14,7 @@ DeepSeek-Harness-Portable-Builder\
 │   ├── assets\                      # 离线缓存（7zip\7za.exe、node\node-v22.23.2-win-x64.zip），缺失时联网下载并回填缓存
 │   ├── data\                        # 随包预置内容，构建时复制进成品 data\（skills、profile 补丁）
 │   └── logs\                        # 构建日志（UTF-16LE，读取需 iconv -f UTF-16LE -t UTF-8）
-├── upstream\                        # 只读镜像：deepseek-ai 官方 dsh 源码；可同步/重置到 origin/master（默认分支 master，不是 main）
+├── upstream\                        # 只读镜像：deepseek-ai 官方 dsh 源码；可同步/重置到 origin/master
 ├── stage\                           # 组装后的未压缩 Portable 目录（DeepSeek-Harness-Portable\）
 └── dist\                            # 最终 ZIP（DeepSeek-Harness-Portable-<ver>-win-x64-<时间戳>.zip）
 ```
