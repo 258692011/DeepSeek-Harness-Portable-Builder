@@ -62,8 +62,6 @@ shim) → **web probe (HTTP 200, dynamically allocated port)** →
 
 ## Sync upstream (every build)
 
-The upstream mirror's default branch is **`master`** (not `main`):
-
 ```powershell
 git -C "D:/DeepSeek-Harness-Portable-Builder/upstream" fetch --prune origin
 git -C "D:/DeepSeek-Harness-Portable-Builder/upstream" reset --hard origin/master
