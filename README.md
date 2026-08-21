@@ -92,7 +92,6 @@ DeepSeek-Harness-Portable\
 & "$env:LOCALAPPDATA\Temp\<解压目录>\DeepSeek-Harness-Portable\node\node.exe" `
   "app\node_modules\@deepseek-ai\dsh\lib\bin.js" --version
 # 3) 启动 DeepSeek Harness.exe,探测 3080 端口应返回 HTTP 200
-# 4) 归档内 data\dsh 只应含预置内容(profiles\web\cordis.patch.yml 及脚手架、skills\),无探针生成的 junction farm 与 storages
 ```
 
 ## 升级策略
