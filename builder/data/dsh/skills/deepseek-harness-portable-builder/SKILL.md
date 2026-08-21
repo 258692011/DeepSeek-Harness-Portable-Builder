@@ -47,7 +47,7 @@ DeepSeek-Harness-Portable\
 ## Build (one command)
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; & 'D:\DeepSeek-Harness-Portable-Builder\builder\templates\DeepSeek-Harness.ps1' *>&1 | Tee-Object -FilePath 'D:\DeepSeek-Harness-Portable-Builder\builder\logs\build-<stamp>.log'"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; & 'D:\DeepSeek-Harness-Portable-Builder\builder\source\DeepSeek-Harness.ps1' *>&1 | Tee-Object -FilePath 'D:\DeepSeek-Harness-Portable-Builder\builder\logs\build-<stamp>.log'"
 ```
 
 Run in background + notify_on_complete (build ≈ 2-4 min: install 30s + archive).
@@ -124,22 +124,33 @@ upstream = read-only mirror of `https://github.com/deepseek-ai/deepseek-harness.
   graph is huge): use pnpm (≈30s vs npm 10+ min hang). Never wait on npm.
 - `pnpm config get node-linker` returns undefined even with `.npmrc` — pass
   `--config.node-linker=hoisted` on the command line.
+- **`dsh web` opens the default browser by itself**: upstream `web-app`
+  defaults `openBrowser: true` and pops the browser on service-ready. Both the
+  launcher (`DeepSeek-Harness.cs`) and the build web probe
+  (`DeepSeek-Harness.ps1`) MUST pass `--no-open` — otherwise the URL opens
+  twice (launcher + dsh) and the build pops a browser on the build machine
+  (2026-08-21 fix).
 
 ## Launcher (DeepSeek-Harness.cs) contract
 
 - winexe via `csc /target:winexe /win32icon:<ico>` — no console window.
 - Sets `DSH_HOME` to `<root>\data\dsh`, prepends `<root>\node` to PATH.
 - Deletes `data\dsh\profiles\node_modules` on start (self-heal after move).
-- **Port 3080 preferred**, fallback to ephemeral when taken (user expectation:
-  3080 is the canonical dsh port — never silently pick a random port).
+- **Port 3080 is canonical and single-instance**: if 3080 is already
+  LISTENING (a previous instance is running), the launcher does NOT start a
+  second server — it waits briefly for HTTP 200, opens
+  `http://127.0.0.1:3080/` directly and exits (no second node process, no
+  second tray). Only when 3080 is free does it boot
+  `dsh web --no-open --port 3080`. No ephemeral-port fallback (removed
+  2026-08-21: a second double-click must never land on a random port).
 - Waits for HTTP 200, opens default browser, tray icon with 打开/退出.
 - Icon: upstream `apps/web/public/favicon.svg` (official DeepSeek whale) →
   sharp (from app node_modules) → PNG 256 → PIL multi-size ICO →
-  `builder\templates\DeepSeek-Harness.ico`.
+  `builder\source\DeepSeek-Harness.ico`.
 
 ## In-place updater (Update.exe)
 
-`builder\templates\Update.cs` compiles to `Update.exe`
+`builder\source\Update.cs` compiles to `Update.exe`
 (winexe + icon) at the portable root. It updates dsh WITHOUT rebuilding:
 
 - Uses the **bundled** `node\node_modules\npm\bin\npm-cli.js` — never system npm.
@@ -162,7 +173,7 @@ upstream = read-only mirror of `https://github.com/deepseek-ai/deepseek-harness.
 - Re-entrancy marker `data\dsh\.dsh-update-in-progress` (PID, stale-safe);
   refuses to run while DeepSeek Harness.exe or a portable node web process
   is alive; diagnostic log `data\dsh\logs\Update-exe-diagnostic.log`.
-- Launcher tray menu: 打开 Web UI / **检查更新** (spawns Update.exe --check)
+- Launcher tray menu: 打开界面 / **检查更新** (spawns Update.exe --check)
   / 退出.
 - C# gotchas: MessageBox.Show returns `DialogResult` (declare `DialogResult
   r =`); write the .cs with UTF-8 BOM (PowerShell 5.1 ANSI-mangles CJK in

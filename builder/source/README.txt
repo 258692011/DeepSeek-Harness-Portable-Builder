@@ -11,7 +11,7 @@ DeepSeek Harness (dsh) v{{DEEPSEEK_HARNESS_VERSION}} — 免安装、可移动�
 快速开始
 --------
 双击 DeepSeek Harness.exe 启动 Web UI,浏览器自动打开 http://127.0.0.1:3080
-(若 3080 被占用,启动器会自动改用空闲端口)
+(程序已在运行时再次双击,只会在浏览器打开该地址,不会启动第二个实例)
 
 命令行方式:
     node\node.exe app\node_modules\@deepseek-ai\dsh\lib\bin.js --help

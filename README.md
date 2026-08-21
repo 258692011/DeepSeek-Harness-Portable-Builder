@@ -7,8 +7,8 @@
 ## 目录职责
 
 - `upstream\`：只保存 deepseek-ai 官方 dsh 源码（只读镜像），可直接同步或重置到 `origin/master`（注意：上游默认分支是 `master`，不是 `main`）
-- `builder\`：本地构建器实现，包括 templates 和 assets；只在构建机使用
-  - `builder\templates\`：构建脚本（入口 `DeepSeek-Harness.ps1`）、启动器/更新器 C# 源码、README 模板、图标、pnpm 安装上下文
+- `builder\`：本地构建器实现，包括 source 和 assets；只在构建机使用
+  - `builder\source\`：构建脚本（入口 `DeepSeek-Harness.ps1`）、启动器/更新器 C# 源码、README 模板、图标、pnpm 安装上下文
   - `builder\assets\`：离线缓存（`7zip\7za.exe`、`node\node-v22.23.2-win-x64.zip`），缺失时联网下载并回填缓存
   - `builder\logs\`：构建日志（UTF-16LE，读取需 `iconv -f UTF-16LE -t UTF-8`）
 - `stage\`：组装后的未压缩 Portable 目录（`DeepSeek-Harness-Portable\`）
@@ -27,19 +27,19 @@
 | .NET Framework C# 编译器 | v4.0（Windows 10/11 自带） | 是（系统组件） | 使用 `Framework64\v4.0.30319\csc.exe` 编译 `DeepSeek Harness.exe` 启动器 |
 | 7za.exe（7-Zip 命令行版） | 随仓库内置 `builder\assets\7zip\7za.exe`（当前 26.02） | 否 | 缺失时联网下载恢复（下载后回填 assets 缓存） |
 
-版本规则：Node 固定 v22.23.2（满足 dsh `engines.node` `^22.19.0 || >=24.0.0`）；pnpm 固定 11.21.0（脚本 `$PnpmVersion`，v11 才支持 `--config.dangerously-allow-all-builds`）；dsh 版本跟随 `upstream\package.json` 的 `version` 字段（当前 `0.1.0-rc.7`，RC 阶段迭代频繁）。
+版本规则：Node 固定 v22.23.2（满足 dsh `engines.node` `^22.19.0 || >=24.0.0`）；pnpm 固定 11.21.0（脚本 `$PnpmVersion`，v11 才支持 `--config.dangerously-allow-all-builds`）；dsh 版本跟随 `upstream\package.json` 的 `version` 字段（当前 `0.1.1-rc.1`，RC 阶段迭代频繁）。
 
 ## 构建
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
-  D:\DeepSeek-Harness-Portable-Builder\builder\templates\DeepSeek-Harness.ps1
+  D:\DeepSeek-Harness-Portable-Builder\builder\source\DeepSeek-Harness.ps1
 ```
 
 或带日志输出（推荐）：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; & 'D:\DeepSeek-Harness-Portable-Builder\builder\templates\DeepSeek-Harness.ps1' *>&1 | Tee-Object -FilePath 'D:\DeepSeek-Harness-Portable-Builder\builder\logs\build-<时间戳>.log'"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; & 'D:\DeepSeek-Harness-Portable-Builder\builder\source\DeepSeek-Harness.ps1' *>&1 | Tee-Object -FilePath 'D:\DeepSeek-Harness-Portable-Builder\builder\logs\build-<时间戳>.log'"
 ```
 
 构建流程（约 2-4 分钟）：
@@ -75,7 +75,7 @@ DeepSeek-Harness-Portable\
 └── README.txt             # 给最终用户的说明
 ```
 
-- 端口：默认 `http://127.0.0.1:3080`（dsh 惯例端口）；被占用时启动器自动改用空闲端口
+- 端口：固定 `http://127.0.0.1:3080`（dsh 惯例端口）；程序已在运行时再次双击只会打开该地址，不会启动第二个实例（无随机端口回退）
 - 自愈：启动器每次启动删除 `data\dsh\profiles\node_modules`（symlink farm），dsh 启动时自动重建——便携包移动后无需任何手动修复
 - 数据随包走：`data\dsh\` 内所有用户数据跟随目录移动
 

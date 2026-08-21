@@ -1,0 +1,10 @@
+# 构建产物
+stage/
+dist/
+
+# 本地缓存与日志(构建时可重新下载/回填)
+builder/assets/
+builder/logs/
+
+# 上游只读镜像(单独管理,不进本仓库)
+upstream/

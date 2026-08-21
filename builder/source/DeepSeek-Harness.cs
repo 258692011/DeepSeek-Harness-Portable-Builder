@@ -29,6 +29,21 @@ internal static class Program
                 return 1;
             }
 
+            // The canonical dsh port: the UI always lives here. A second
+            // double-click while the app is already running must not spin up
+            // a new instance on a random port — hand the browser to the
+            // running instance instead.
+            const int port = 3080;
+            string url = "http://127.0.0.1:" + port + "/";
+            if (PortInUse(port))
+            {
+                // The first instance may still be booting; give it a moment,
+                // then open its page and exit (no second server, no tray).
+                WaitForHttp(url, TimeSpan.FromSeconds(5));
+                Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
+                return 0;
+            }
+
             // Self-heal the profile node_modules link farm: after the portable
             // is moved, the profile links point at the old absolute location.
             // dsh rebuilds them on boot; deleting the stale farm forces that.
@@ -44,11 +59,14 @@ internal static class Program
             Environment.SetEnvironmentVariable("PATH",
                 Path.Combine(_root, "node") + ";" + Environment.GetEnvironmentVariable("PATH"));
 
-            int port = PickPort(3080);
             var psi = new ProcessStartInfo
             {
                 FileName = nodeExe,
-                Arguments = "\"" + dshEntry + "\" web --port " + port,
+                // --no-open: upstream dsh web opens the default browser itself
+                // (openBrowser defaults true); the launcher below is the single
+                // owner of the browser handoff. Without this flag the URL
+                // opens twice.
+                Arguments = "\"" + dshEntry + "\" web --no-open --port " + port,
                 WorkingDirectory = Path.Combine(_root, "app"),
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -56,7 +74,6 @@ internal static class Program
             _child = Process.Start(psi);
 
             // Wait for the web UI to come up, then open the browser.
-            string url = "http://127.0.0.1:" + port + "/";
             var ready = WaitForHttp(url, TimeSpan.FromSeconds(60));
             if (ready) { Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true }); }
 
@@ -73,18 +90,6 @@ internal static class Program
         {
             try { if (_child != null && !_child.HasExited) _child.Kill(); } catch { }
         }
-    }
-
-    private static int PickPort(int preferred)
-    {
-        // Prefer the canonical dsh port 3080; fall back to a free ephemeral
-        // port when it is already taken (e.g. another instance running).
-        if (!PortInUse(preferred)) return preferred;
-        var l = new TcpListener(IPAddress.Loopback, 0);
-        l.Start();
-        int port = ((IPEndPoint)l.LocalEndpoint).Port;
-        l.Stop();
-        return port;
     }
 
     private static bool PortInUse(int port)
@@ -135,7 +140,7 @@ internal static class Program
             Visible = true,
         };
         var menu = new ContextMenuStrip();
-        menu.Items.Add("打开 Web UI", null, (s, e) =>
+        menu.Items.Add("打开界面", null, (s, e) =>
             Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true }));
         menu.Items.Add("检查更新", null, (s, e) =>
         {

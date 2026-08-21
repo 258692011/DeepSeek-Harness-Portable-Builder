@@ -9,7 +9,7 @@ $StageParent = Join-Path $BuilderRoot 'stage'
 $Stage = Join-Path $StageParent 'DeepSeek-Harness-Portable'
 $Dist = Join-Path $BuilderRoot 'dist'
 $Builder = Join-Path $BuilderRoot 'builder'
-$Templates = Join-Path $Builder 'templates'
+$SourceDir = Join-Path $Builder 'source'
 
 # Offline caches live under builder\assets (7zip + node + pnpm). The builder
 # is fully self-contained: missing assets are downloaded and back-filled,
@@ -221,7 +221,7 @@ function Build-DshPackage {
     # produces a flat, symlink-free node_modules that survives archive/restore
     # (verified 2026-08-18 — plain pnpm symlink store breaks after 7za roundtrip).
     New-Item -ItemType Directory -Force $WorkDir | Out-Null
-    Copy-Item (Join-Path $Templates 'package.json') (Join-Path $WorkDir 'package.json') -Force
+    Copy-Item (Join-Path $SourceDir 'package.json') (Join-Path $WorkDir 'package.json') -Force
     Set-Content -Path (Join-Path $WorkDir '.npmrc') -Value 'node-linker=hoisted' -Encoding ASCII
     $version = (Get-Content (Join-Path $Repo 'package.json') -Raw | ConvertFrom-Json).version
     $oldPath = $env:PATH
@@ -284,29 +284,29 @@ if (Test-Path $builderData) {
 # Launcher + README.
 $csc = "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 if (-not (Test-Path $csc)) { throw "csc.exe not found: $csc" }
-$launcherIcon = Join-Path $Templates 'DeepSeek-Harness.ico'
+$launcherIcon = Join-Path $SourceDir 'DeepSeek-Harness.ico'
 if (-not (Test-Path $launcherIcon)) { throw "Launcher icon missing: $launcherIcon" }
 # The launcher exe ships as "DeepSeek Harness.exe" (space, not hyphen): the
 # name users see in Explorer and in Update.exe's process checks.
 $launcherOut = Join-Path $Stage 'DeepSeek Harness.exe'
 Invoke-NativeChecked 'DeepSeek Harness launcher compilation' {
-    & $csc /nologo /target:winexe /platform:anycpu /optimize+ "/win32icon:$launcherIcon" "/out:`"$launcherOut`"" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll (Join-Path $Templates 'DeepSeek-Harness.cs')
+    & $csc /nologo /target:winexe /platform:anycpu /optimize+ "/win32icon:$launcherIcon" "/out:`"$launcherOut`"" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll (Join-Path $SourceDir 'DeepSeek-Harness.cs')
 }
 if (-not (Test-Path $launcherOut)) { throw 'DeepSeek Harness.exe was not produced.' }
 
-Copy-Item (Join-Path $Templates 'README.txt') (Join-Path $Stage 'README.txt') -Force
+Copy-Item (Join-Path $SourceDir 'README.txt') (Join-Path $Stage 'README.txt') -Force
 
 # Ship the in-place updater as a windowless winexe at the portable root
 # (double-clickable; uses the bundled npm, never touches data\dsh).
-$updateIcon = Join-Path $Templates 'DeepSeek-Harness.ico'
+$updateIcon = Join-Path $SourceDir 'DeepSeek-Harness.ico'
 Invoke-NativeChecked 'Update.exe compilation' {
-    & $csc /nologo /target:winexe /platform:anycpu /optimize+ "/win32icon:$updateIcon" "/out:$Stage\Update.exe" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll (Join-Path $Templates 'Update.cs')
+    & $csc /nologo /target:winexe /platform:anycpu /optimize+ "/win32icon:$updateIcon" "/out:$Stage\Update.exe" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll (Join-Path $SourceDir 'Update.cs')
 }
 if (-not (Test-Path (Join-Path $Stage 'Update.exe'))) { throw 'Update.exe was not produced.' }
 
 $version = (Get-Content (Join-Path $Repo 'package.json') -Raw | ConvertFrom-Json).version
 $nodeVersion = (& (Join-Path $Stage 'node\node.exe') --version).Trim()
-$readme = [IO.File]::ReadAllText((Join-Path $Templates 'README.txt'), [Text.Encoding]::UTF8)
+$readme = [IO.File]::ReadAllText((Join-Path $SourceDir 'README.txt'), [Text.Encoding]::UTF8)
 $readme = $readme.Replace('{{DEEPSEEK_HARNESS_VERSION}}', $version).Replace('{{SOURCE_COMMIT}}', $commit).Replace('{{NODE_VERSION}}', $nodeVersion)
 [IO.File]::WriteAllText((Join-Path $Stage 'README.txt'), $readme, [Text.UTF8Encoding]::new($false))
 
@@ -334,8 +334,10 @@ try {
 $probePort = Get-FreePort
 $oldDshHome = $env:DSH_HOME
 $env:DSH_HOME = Join-Path $Stage 'data\dsh'
+# --no-open: upstream dsh web opens the default browser itself (openBrowser
+# defaults true); the probe must never pop a browser on the build machine.
 $probe = Start-Process -FilePath $nodeExe `
-    -ArgumentList @($dshEntry, 'web', '--port', "$probePort") `
+    -ArgumentList @($dshEntry, 'web', '--no-open', '--port', "$probePort") `
     -WorkingDirectory (Join-Path $Stage 'app') -PassThru -WindowStyle Hidden
 try {
     $ok = $false
