@@ -6,13 +6,18 @@
 
 ## 目录职责
 
-- `upstream\`：只保存 deepseek-ai 官方 dsh 源码（只读镜像），可直接同步或重置到 `origin/master`（注意：上游默认分支是 `master`，不是 `main`）
-- `builder\`：本地构建器实现，包括 source 和 assets；只在构建机使用
-  - `builder\source\`：构建脚本（入口 `DeepSeek-Harness.ps1`）、启动器/更新器 C# 源码、README 模板、图标、pnpm 安装上下文
-  - `builder\assets\`：离线缓存（`7zip\7za.exe`、`node\node-v22.23.2-win-x64.zip`），缺失时联网下载并回填缓存
-  - `builder\logs\`：构建日志（UTF-16LE，读取需 `iconv -f UTF-16LE -t UTF-8`）
-- `stage\`：组装后的未压缩 Portable 目录（`DeepSeek-Harness-Portable\`）
-- `dist\`：最终 ZIP（`DeepSeek-Harness-Portable-<ver>-win-x64-<时间戳>.zip`）
+```
+DeepSeek-Harness-Portable-Builder\
+├── README.md                        # 本说明文档（构建器用法）
+├── builder\                         # 本地构建器实现；只在构建机使用
+│   ├── source\                      # 构建脚本（入口 DeepSeek-Harness.ps1）、启动器/更新器 C# 源码、README 模板、图标、pnpm 安装上下文
+│   ├── assets\                      # 离线缓存（7zip\7za.exe、node\node-v22.23.2-win-x64.zip），缺失时联网下载并回填缓存
+│   ├── data\                        # 随包预置内容，构建时复制进成品 data\（skills、profile 补丁）
+│   └── logs\                        # 构建日志（UTF-16LE，读取需 iconv -f UTF-16LE -t UTF-8）
+├── upstream\                        # 只读镜像：deepseek-ai 官方 dsh 源码；可同步/重置到 origin/master（默认分支 master，不是 main）
+├── stage\                           # 组装后的未压缩 Portable 目录（DeepSeek-Harness-Portable\）
+└── dist\                            # 最终 ZIP（DeepSeek-Harness-Portable-<ver>-win-x64-<时间戳>.zip）
+```
 
 ## 构建机要求
 
