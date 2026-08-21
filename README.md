@@ -86,13 +86,13 @@ DeepSeek-Harness-Portable\
 
 ## 冒烟测试
 
-```powershell
-# 1) 提取归档
-# 2) 运行 CLI 验证
-& "$env:LOCALAPPDATA\Temp\<解压目录>\DeepSeek-Harness-Portable\node\node.exe" `
-  "app\node_modules\@deepseek-ai\dsh\lib\bin.js" --version
-# 3) 启动 DeepSeek Harness.exe,探测 3080 端口应返回 HTTP 200
-```
+解压到临时目录后按发布验证清单执行（完整细节见技能 `deepseek-harness-portable-builder`）：
+
+1. CLI 版本：`node\node.exe app\node_modules\@deepseek-ai\dsh\lib\bin.js --version` → 输出版本号
+2. 运行 `DeepSeek Harness.exe`，轮询 `http://127.0.0.1:3080/` → HTTP 200，页面标题 `<title>DeepSeek Harness</title>`
+3. 自愈检查：`data\dsh\profiles\node_modules\@deepseek-ai` → 约 195 个 junction 条目（启动后自动重建）
+4. 图标：可从 DeepSeek Harness.exe 提取 32x32 图标
+5. 归档校验：`7za t` → "Everything is Ok"；`data\dsh` 只含预置内容（`profiles\web\cordis.patch.yml` + 官方脚手架、`skills\`），无探针生成的 junction farm 与 `storages`
 
 ## 升级策略
 
