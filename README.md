@@ -26,7 +26,7 @@ DeepSeek-Harness-Portable-Builder\
 | 软件 | 版本要求 | 是否必须预装 | 说明 |
 |---|---|---:|---|
 | Windows PowerShell | 5.1（Windows 自带） | 是 | 构建入口运行环境 |
-| Git（PortableGit） | 固定 2.55.0.3 | 否 | 构建器**不读取系统**；从 `builder\assets\git\` 缓存取（解压后的目录），缺失才下载、解压并回填缓存；仅用于 `Assert-Upstream` 读取 `upstream\` 状态与提交号，不进成品 |
+| Git（PortableGit） | 固定 2.55.0.3 | 否 | 构建器不读取系统；从 `builder\assets\git\` 缓存取（解压后的目录），缺失才下载、解压并回填缓存；仅用于 `Assert-Upstream` 读取 `upstream\` 状态与提交号，不进成品 |
 | pnpm | 固定 11.21.0 | 否 | 安装 `@deepseek-ai/dsh` 发布包；不用系统 pnpm，用包内 npm 装固定版本并回填 `builder\assets\pnpm\` 缓存（下载后回填 assets 缓存） |
 | Node.js + npm | 固定 v22.23.2 | 否 | 打包进成品的 Node 运行时不读取系统，从 `builder\assets\node\` 缓存取，缺失才下载（下载后回填 assets 缓存） |
 | .NET Framework C# 编译器 | v4.0（Windows 10/11 自带） | 是 | 使用 `Framework64\v4.0.30319\csc.exe` 编译 `DeepSeek Harness.exe` 启动器 |
