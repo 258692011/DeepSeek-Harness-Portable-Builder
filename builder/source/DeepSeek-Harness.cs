@@ -191,7 +191,14 @@ internal static class Program
             Application.Exit();
         });
         _tray.ContextMenuStrip = menu;
-        _tray.DoubleClick += (s, e) =>
-            Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
+        // Left single-click opens the UI (double-click on a tray icon is the
+        // historical default, but single-click is the expected gesture now).
+        _tray.MouseClick += (s, e) =>
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
+            }
+        };
     }
 }
