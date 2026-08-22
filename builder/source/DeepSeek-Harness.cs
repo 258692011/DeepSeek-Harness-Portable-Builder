@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -88,8 +88,32 @@ internal static class Program
         }
         finally
         {
-            try { if (_child != null && !_child.HasExited) _child.Kill(); } catch { }
+            KillChildTree();
         }
+    }
+
+    // Kill the dsh web process AND its whole subtree: a plain _child.Kill()
+    // leaves orphaned grandchildren (code-runtime workers, ripgrep, …) alive
+    // holding files — taskkill /T /F is the reliable tree kill on Windows
+    // (2026-08-22).
+    private static void KillChildTree()
+    {
+        try
+        {
+            if (_child != null && !_child.HasExited)
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "taskkill.exe",
+                    Arguments = "/PID " + _child.Id + " /T /F",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
+                using (var k = Process.Start(psi)) { k.WaitForExit(5000); }
+            }
+        }
+        catch { }
+        try { if (_child != null && !_child.HasExited) _child.Kill(); } catch { }
     }
 
     private static bool PortInUse(int port)
@@ -136,7 +160,7 @@ internal static class Program
         _tray = new NotifyIcon
         {
             Icon = trayIcon ?? System.Drawing.SystemIcons.Application,
-            Text = "DeepSeek Harness Portable",
+            Text = "DeepSeek Harness",
             Visible = true,
         };
         var menu = new ContextMenuStrip();
@@ -162,7 +186,7 @@ internal static class Program
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("退出", null, (s, e) =>
         {
-            try { if (_child != null && !_child.HasExited) _child.Kill(); } catch { }
+            KillChildTree();
             _tray.Visible = false;
             Application.Exit();
         });

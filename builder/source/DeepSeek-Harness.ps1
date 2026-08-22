@@ -103,17 +103,66 @@ function Get-FreePort {
     }
 }
 
+function Ensure-Utf8Bom([string]$Path) {
+    # csc.exe (the .NET Framework compiler) decodes BOM-less sources with the
+    # system ANSI codepage, which mangles the CJK strings in our .cs files on
+    # non-UTF-8 systems. Rewrite the file with a UTF-8 BOM (idempotent) so the
+    # compiled exe always carries intact Chinese, regardless of how the source
+    # was saved or which machine builds it. (2026-08-22: Update.cs lost its BOM
+    # in an edit and compiled fine here only because this machine's csc
+    # happened to detect UTF-8; never rely on that.)
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) { return }
+    $text = [Text.Encoding]::UTF8.GetString($bytes)
+    [IO.File]::WriteAllText($Path, $text, [Text.UTF8Encoding]::new($true))
+    Write-Host "Added UTF-8 BOM to $Path"
+}
+
+function Resolve-Git {
+    # PortableGit for upstream reads, cached UNPACKED under
+    # builder\assets\git\PortableGit (self-contained contract, same as
+    # node/pnpm/7za; the system git is never consulted — 2026-08-22).
+    # Cache miss -> download the pinned release, extract to temp, back-fill
+    # the unpacked cache dir (the temp archive is not kept); later builds are
+    # fully offline with zero per-build extraction.
+    $gitTag = 'v2.55.0.windows.3'
+    $gitVer = '2.55.0.3'
+    $asset = "PortableGit-$gitVer-64-bit.7z.exe"
+    $gitCacheDir = Join-Path $Builder "assets\git"
+    $unpacked = Join-Path $gitCacheDir 'PortableGit'
+    $cachedExe = Join-Path $unpacked 'cmd\git.exe'
+    if (-not (Test-Path $cachedExe)) {
+        $archive = Join-Path $env:TEMP $asset
+        Write-Host "Downloading PortableGit $gitVer (cache miss)..."
+        Invoke-WebRequest -Uri "https://github.com/git-for-windows/git/releases/download/$gitTag/$asset" -OutFile $archive -UseBasicParsing -TimeoutSec 600
+        $extractDir = Join-Path $env:TEMP "portablegit-$(Get-Random)"
+        New-Item -ItemType Directory -Force $extractDir | Out-Null
+        $proc = Start-Process -FilePath $archive -ArgumentList "-o`"$extractDir`"", '-y' -NoNewWindow -Wait -PassThru
+        if ($proc.ExitCode -ne 0 -or -not (Test-Path (Join-Path $extractDir 'cmd\git.exe'))) {
+            throw "PortableGit extraction failed (exit $($proc.ExitCode))."
+        }
+        Copy-Item $extractDir $unpacked -Recurse -Force
+        Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $archive -Force -ErrorAction SilentlyContinue
+        Write-Host "Back-filled PortableGit cache: $unpacked"
+    } else {
+        Write-Host "Using cached PortableGit: $cachedExe"
+    }
+    return $cachedExe
+}
+
 function Assert-Upstream {
+    param([string]$GitExe)
     $officialRepo = 'https://github.com/deepseek-ai/deepseek-harness.git'
     if (-not (Test-Path (Join-Path $Repo '.git'))) {
         throw "Upstream checkout missing at $Repo — run: git clone $officialRepo `"$Repo`""
     }
-    $dirty = & git.exe -C $Repo status --porcelain
+    $dirty = & $GitExe -C $Repo status --porcelain
     if ($dirty) {
         Write-Host "WARN: upstream checkout is not clean (will still build from HEAD):"
         $dirty | Select-Object -First 3
     }
-    $commit = (& git.exe -C $Repo rev-parse HEAD).Trim()
+    $commit = (& $GitExe -C $Repo rev-parse HEAD).Trim()
     Write-Host "Building from upstream commit $commit"
     return $commit
 }
@@ -237,7 +286,7 @@ function Build-DshPackage {
             # dangerously-allow-all-builds is required: pnpm 11 blocks dep
             # install scripts by default and exits 1 with
             # ERR_PNPM_IGNORED_BUILDS (node-pty/koffi native modules need them).
-            & $PnpmPath add "@deepseek-ai/dsh@$version" --config.node-linker=hoisted --registry=https://registry.npmjs.org/ --config.dangerously-allow-all-builds
+            & $PnpmPath add "@deepseek-ai/dsh@$version" --config.node-linker=hoisted --registry=https://registry.npmjs.org/ --config.dangerously-allow-all-builds --fetch-retries=5 --network-concurrency=8 --config.minimum-release-age=0
         }
     } finally {
         Pop-Location
@@ -248,7 +297,8 @@ function Build-DshPackage {
 }
 
 # ---------------------------------------------------------------- main
-$commit = Assert-Upstream
+$gitExe = Resolve-Git
+$commit = Assert-Upstream $gitExe
 
 # Delete staged portable before any build work.
 Remove-TreeSafe $Stage
@@ -262,6 +312,14 @@ $nodeDir = Resolve-Node
 $pnpm = Resolve-Pnpm $nodeDir
 Write-Host "Node runtime ready: $nodeDir"
 Write-Host "pnpm: $pnpm"
+# pnpm is part of the shipped portable (node\node_modules\pnpm, self-contained
+# package dir): Update.exe uses it for fast in-place updates. Fail the build if
+# it is not actually present so the updater contract can never silently break.
+$pnpmShips = Join-Path $nodeDir 'node_modules\pnpm\bin\pnpm.cjs'
+if (-not (Test-Path $pnpmShips)) { throw "pnpm.cjs missing in shipped node dir: $pnpmShips (Update.exe depends on it)" }
+$pnpmVer = & (Join-Path $nodeDir 'node.exe') $pnpmShips --version
+if ($LASTEXITCODE -ne 0) { throw "bundled pnpm --version failed (exit $LASTEXITCODE)." }
+Write-Host "Bundled pnpm for the updater: $($pnpmVer.Trim()) ($pnpmShips)"
 
 # Build the dsh package into a staging workdir (hoisted, flat node_modules).
 $appDir = Join-Path $Stage 'app'
@@ -289,6 +347,7 @@ if (-not (Test-Path $launcherIcon)) { throw "Launcher icon missing: $launcherIco
 # The launcher exe ships as "DeepSeek Harness.exe" (space, not hyphen): the
 # name users see in Explorer and in Update.exe's process checks.
 $launcherOut = Join-Path $Stage 'DeepSeek Harness.exe'
+Ensure-Utf8Bom (Join-Path $SourceDir 'DeepSeek-Harness.cs')
 Invoke-NativeChecked 'DeepSeek Harness launcher compilation' {
     & $csc /nologo /target:winexe /platform:anycpu /optimize+ "/win32icon:$launcherIcon" "/out:`"$launcherOut`"" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll (Join-Path $SourceDir 'DeepSeek-Harness.cs')
 }
@@ -297,8 +356,12 @@ if (-not (Test-Path $launcherOut)) { throw 'DeepSeek Harness.exe was not produce
 Copy-Item (Join-Path $SourceDir 'README.txt') (Join-Path $Stage 'README.txt') -Force
 
 # Ship the in-place updater as a windowless winexe at the portable root
-# (double-clickable; uses the bundled npm, never touches data\dsh).
+# (double-clickable; uses the bundled pnpm — npm fallback — never touches
+# data\dsh). pnpm makes updates ~30s instead of npm's 10+ minute hang on the
+# huge dsh dep tree (measured 2026-08-22; the user-visible failure mode was an
+# endless marquee bar and a silently failed install).
 $updateIcon = Join-Path $SourceDir 'DeepSeek-Harness.ico'
+Ensure-Utf8Bom (Join-Path $SourceDir 'Update.cs')
 Invoke-NativeChecked 'Update.exe compilation' {
     & $csc /nologo /target:winexe /platform:anycpu /optimize+ "/win32icon:$updateIcon" "/out:$Stage\Update.exe" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll (Join-Path $SourceDir 'Update.cs')
 }
@@ -428,6 +491,18 @@ if (-not $SkipArchive) {
             }
         }
         Write-Host 'Cleared probe-generated dsh data (profiles farm/storages); kept preinstalled skills and profile patches.'
+    }
+
+    # The hoisted app\node_modules carries a .modules.yaml whose storeDir /
+    # virtualStoreDir record THIS builder machine's paths (stage dir). It must
+    # not ship: pnpm on the user's machine reads it and refuses to update
+    # ("dependencies are currently symlinked from the virtual store...").
+    # A hoisted tree does not need the file, and Update.exe deletes it again
+    # before each update, so stripping it here is purely hygiene for fresh zips.
+    $modulesYaml = Join-Path $Stage 'app\node_modules\.modules.yaml'
+    if (Test-Path $modulesYaml) {
+        Remove-Item $modulesYaml -Force
+        Write-Host 'Removed builder-machine metadata app\node_modules\.modules.yaml (pnpm would refuse it).'
     }
 
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'

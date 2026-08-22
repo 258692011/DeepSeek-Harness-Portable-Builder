@@ -34,7 +34,7 @@ DeepSeek Harness (dsh) v{{DEEPSEEK_HARNESS_VERSION}} — 免安装、可移动�
 
 更新
 ----
-双击包根目录的 Update.exe 即可原地升级 dsh(无窗口,使用包内 npm,
+双击包根目录的 Update.exe 打开更新窗口,点击“检查更新”查看最新版本,再点“立即更新”即可原地升级 dsh(使用包内 pnpm 快速安装,
 无需网络以外的工具;用户数据 data\dsh\ 原样保留)。
 更新前请先退出 DeepSeek Harness.exe(托盘图标 -> 退出)。
 若 dsh 发布新版后提升了 Node 版本要求,或需要新图标/启动器改动,
