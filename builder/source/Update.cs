@@ -615,13 +615,13 @@ internal static class Program
                     else if (string.Equals(NormalizeVersion(_current), NormalizeVersion(_latest), StringComparison.OrdinalIgnoreCase))
                     {
                         _lblLatest.Text = "最新版本：" + _latest;
-                        SetStatus("已是最新版本（" + _latest + "）。");
+                        SetStatus("已是最新版本");
                         AppendLog("already latest: " + _latest);
                     }
                     else
                     {
                         _lblLatest.Text = "最新版本：" + _latest;
-                        SetStatus("发现新版本：" + _latest + "（当前 " + _current + "），点击“立即更新”。");
+                        SetStatus("发现新版本：" + _latest + "，点击“立即更新”。");
                         AppendLog("update available: " + _current + " -> " + _latest);
                     }
                     SetBusy(false);
