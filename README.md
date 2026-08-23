@@ -60,7 +60,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[Console]::OutputEnc
 ## 同步 upstream
 
 构建前建议先同步（upstream 是只读镜像，可随时重置；自 2026-08-23 起为
-**depth-1 浅克隆**，`.git` ~150MB+ → 19MB，勿改回全量 fetch，否则镜像会被重新撑大）：
+depth-1 浅克隆，`.git` ~150MB+ → 19MB，勿改回全量 fetch，否则镜像会被重新撑大）：
 
 ```powershell
 git -C "D:/DeepSeek-Harness-Portable-Builder/upstream" fetch --depth 1 --no-tags origin master
@@ -82,8 +82,8 @@ DeepSeek-Harness-Portable\
 └── README.txt             # 给最终用户的说明
 ```
 
-- 界面：`DeepSeek Harness.exe` 用 **WebView2 应用窗口**（非浏览器）打开 `http://127.0.0.1:3080`；窗口标题固定、左上角为 DeepSeek 图标；关闭窗口 = 隐藏到托盘，托盘"退出"才真正退出；窗口大小可调、调整后自动记忆（`data\webview2\window-state.ini`）；外部链接/新窗口交给系统默认浏览器打开；托盘菜单：打开界面 / 打开网页（系统默认浏览器打开同一界面）/ 检查更新 / 退出
-- 端口与实例：首实例使用固定 `http://127.0.0.1:3080`（dsh 惯例端口）；**同一路径**再次双击只唤起已有窗口并置前（按路径哈希命名的 mutex 保证同路径单实例，ForceForeground 绕过前台锁），不会启动第二个实例；**整包复制到其他目录后启动**，若 3080 已被占用则自动改用系统分配的随机端口（`--port 0` 语义，启动器内解析），多份拷贝可同时并存、互不干扰（各自独立的 `data\dsh` / `data\webview2`）
+- 界面：`DeepSeek Harness.exe` 用 WebView2 应用窗口（非浏览器）打开 `http://127.0.0.1:3080`；窗口标题固定、左上角为 DeepSeek 图标；关闭窗口 = 隐藏到托盘，托盘"退出"才真正退出；窗口大小可调、调整后自动记忆（`data\webview2\window-state.ini`）；外部链接/新窗口交给系统默认浏览器打开；托盘菜单：打开界面 / 打开网页（系统默认浏览器打开同一界面）/ 检查更新 / 退出
+- 端口与实例：首实例使用固定 `http://127.0.0.1:3080`（dsh 惯例端口）；同一路径再次双击只唤起已有窗口并置前（按路径哈希命名的 mutex 保证同路径单实例，ForceForeground 绕过前台锁），不会启动第二个实例；整包复制到其他目录后启动，若 3080 已被占用则自动改用系统分配的随机端口（`--port 0` 语义，启动器内解析），多份拷贝可同时并存、互不干扰（各自独立的 `data\dsh` / `data\webview2`）
 - WebView2 运行时：Evergreen 模式使用系统已装的 WebView2 Runtime（Win10/11 大多自带）；缺失时应用弹窗提示并引导安装，必要时回退到默认浏览器
 - 自愈：启动器每次启动删除 `data\dsh\profiles\node_modules`（symlink farm），dsh 启动时自动重建——便携包移动后无需任何手动修复
 - 数据随包走：`data\dsh\` 内所有用户数据跟随目录移动
