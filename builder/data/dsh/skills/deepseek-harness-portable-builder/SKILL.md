@@ -22,6 +22,49 @@ Builds a relocatable Windows x64 portable of **DeepSeek Harness (dsh)** — the
 pure-TypeScript agent harness (no Electron, no Python core). Product lives in
 `D:\DeepSeek-Harness-Portable-Builder`; output zip lands in `dist\`.
 
+## 经验写回 (Record lessons back into this skill)
+
+Whenever you make a mistake while working on this project and then find the
+correct approach, **update this skill immediately in the same session** — do
+not wait to be asked, do not defer to a later task. This skill is the
+project's institutional memory; every error-to-fix cycle that is not written
+back is a lesson the next run will re-pay.
+
+Trigger: you hit an error, a wrong assumption, a failed command, a user
+correction, or a rework — AND you then found the approach that actually
+worked. Typical examples from this project: the text-edit tool rewrites .cs
+files WITHOUT the UTF-8 BOM that csc needs (re-add it before compiling;
+the build's Ensure-Utf8Bom fixes it anyway — commit the BOM'd file);
+`csc.exe` is a C# 5 compiler (no `out _` discards, no out-variable
+declarations — declare variables first); PowerShell surfaces any native
+stderr as NativeCommandError noise (judge by exit code, not the red text);
+the Windows foreground lock refuses `Activate()` when another process owns
+focus, so the second-double-click reveal needs ForceForeground
+(AttachThreadInput + SetForegroundWindow).
+
+How to record:
+
+1. **Where**: add a dated pitfall (`observed YYYY-MM-DD`) to the `## Pitfalls`
+   section of this SKILL.md. If it is a launcher/updater detail, also touch
+   the matching contract section. Update this section with a short pointer
+   line when the detail lives elsewhere.
+2. **What**: symptom (exact error/behavior), root cause, the proven correct
+   approach, and a one-line verification note. Name real files/line numbers
+   where useful.
+3. **Both copies**: this skill ships twice and MUST stay byte-identical —
+   the profile master (this file) and the 随包预置副本
+   `D:\DeepSeek-Harness-Portable-Builder\builder\data\dsh\skills\deepseek-harness-portable-builder\SKILL.md`.
+   Patch the profile copy, copy it over the preinstall copy, verify `diff`
+   reports IDENTICAL, and if the change touches the builder repo, commit+push
+   it.
+4. **Scope**: record only lessons that would save time if the same mistake
+   recurs (project-specific, non-trivial, cost real time). Do not record
+   one-off trivia, task progress, or anything stale in a week. When unsure
+   whether a lesson is worth recording, record it — a concise pitfall is
+   cheap; re-learning the mistake is not.
+5. **Report**: in the final reply, state what was added and that both copies
+   are in sync.
+
 Portable layout (what ships):
 
 ```
