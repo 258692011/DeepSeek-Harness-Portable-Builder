@@ -43,9 +43,12 @@ internal static class Program
         // A stale marker from a killed process is ignored (PID not alive).
         // --check is read-only (registry query only) and never claims the
         // marker, so a tray "检查更新" always works even while the window is
-        // open (2026-08-22).
+        // open (2026-08-22). The marker is deleted in the finally block ONLY
+        // if this process actually claimed it — an unrelated --check window
+        // closing must never delete an in-progress update's marker (2026-08-24).
         bool markerOk = true;
         int markerPid = 0;
+        bool markerClaimed = false;
         try
         {
             if (!s_checkOnly && File.Exists(s_markerPath))
@@ -59,7 +62,11 @@ internal static class Program
                 }
                 if (oldAlive) { markerOk = false; markerPid = oldPid; }
             }
-            if (markerOk && !s_checkOnly) File.WriteAllText(s_markerPath, Process.GetCurrentProcess().Id.ToString());
+            if (markerOk && !s_checkOnly)
+            {
+                File.WriteAllText(s_markerPath, Process.GetCurrentProcess().Id.ToString());
+                markerClaimed = true;
+            }
         }
         catch (Exception ex) { Log("marker claim failed: " + ex.Message); }
 
@@ -81,7 +88,13 @@ internal static class Program
         }
         finally
         {
-            try { if (File.Exists(s_markerPath)) File.Delete(s_markerPath); } catch { }
+            // Only this process's own marker is removed. An unrelated window
+            // (--check during an update, or a second Update.exe that saw the
+            // marker) must never delete the marker of the running update.
+            if (markerClaimed)
+            {
+                try { if (File.Exists(s_markerPath)) File.Delete(s_markerPath); } catch { }
+            }
         }
     }
 
@@ -95,7 +108,9 @@ internal static class Program
                 try
                 {
                     string cmd = p.MainModule.FileName;
-                    if (cmd != null && cmd.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                    // Match the portable root as a full path segment (root + "\"),
+                    // not a bare prefix: D:\portable must never match D:\portable2.
+                    if (cmd != null && cmd.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase))
                         list.Add(p.Id.ToString());
                 }
                 catch { }
@@ -629,7 +644,10 @@ internal static class Program
                 try
                 {
                     string f = p.MainModule.FileName;
-                    if (f != null && f.StartsWith(_root, StringComparison.OrdinalIgnoreCase))
+                    // Full path-segment match (root + "\") so a sibling portable
+                    // whose path is a prefix of ours (D:\portable2 vs D:\portable)
+                    // is never touched (2026-08-24).
+                    if (f != null && f.StartsWith(_root + "\\", StringComparison.OrdinalIgnoreCase))
                     {
                         Log("stopping launcher PID " + p.Id + " (" + f + ")");
                         KillTree(p.Id);

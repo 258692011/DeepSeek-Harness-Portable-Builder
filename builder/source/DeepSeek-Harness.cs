@@ -17,6 +17,9 @@ internal static class Program
     private static NotifyIcon _tray;
     private static string _root;
     private static string _url;
+    private static int _port;
+    private static string _revealEvent;
+    private static Mutex _instanceMutex; // held for the process lifetime: one instance per portable path
     private static Form _shell;
     private static WebView2 _web;
     private static bool _exiting;
@@ -36,26 +39,37 @@ internal static class Program
                 return 1;
             }
 
-            // The canonical dsh port: the UI always lives here. A second
-            // double-click while the app is already running must not spin up
-            // a new instance on a random port — show the running app window instead.
-            const int port = 3080;
-            _url = "http://127.0.0.1:" + port + "/";
-            if (PortInUse(port))
+            // Single instance per portable PATH (not per machine): a named mutex
+            // derived from the root directory stops a second launcher of the SAME
+            // copy from starting. Same path = same data\dsh + data\webview2, and
+            // two processes must never share those (WebView2 refuses a user data
+            // folder already in use by another process). A second double-click of
+            // the same copy reveals the running window instead of booting again.
+            string pathKey = StableHash(_root);
+            string mutexName = "DeepSeekHarnessPortable_Mutex_" + pathKey;
+            _revealEvent = "DeepSeekHarnessPortable_Show_" + pathKey;
+            _instanceMutex = new Mutex(false, mutexName);
+            bool ownMutex;
+            try { ownMutex = _instanceMutex.WaitOne(0); }
+            catch (AbandonedMutexException) { ownMutex = true; } // previous instance crashed: we took over
+            if (!ownMutex)
             {
-                // The first instance may still be booting; give it a moment,
-                // then show its app window. If nothing answers, the port is
-                // held by some other program — say so instead of exiting
-                // silently with no window and no error.
-                bool secondReady = WaitForHttp(_url, TimeSpan.FromSeconds(5));
-                if (!secondReady)
-                {
-                    MessageBox.Show("端口 3080 已被其他程序占用，无法启动本应用。\r\n请关闭占用 3080 端口的程序后重试。",
-                        "DeepSeek Harness Portable", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
+                // Another launcher of THIS path is already running — ask it to
+                // show its window and exit. If it is still booting, the reveal
+                // signal is lost and it shows its own window when ready.
                 RevealShell();
                 return 0;
             }
+
+            // Port selection: 3080 is the canonical port the first instance of
+            // any copy uses (README documents it). Copies launched from OTHER
+            // paths (or a foreign program holding 3080) must not collide with
+            // the running instance — instead of failing or hijacking it, boot on
+            // an OS-assigned random port (node's "--port 0" semantics, resolved
+            // HERE so the launcher knows the concrete URL for the app window).
+            const int canonicalPort = 3080;
+            _port = PortInUse(canonicalPort) ? GetFreePort() : canonicalPort;
+            _url = "http://127.0.0.1:" + _port + "/";
 
             // Self-heal the profile node_modules link farm: after the portable
             // is moved, the profile links point at the old absolute location.
@@ -72,21 +86,21 @@ internal static class Program
             Environment.SetEnvironmentVariable("PATH",
                 Path.Combine(_root, "node") + ";" + Environment.GetEnvironmentVariable("PATH"));
 
-            var psi = new ProcessStartInfo
-            {
-                FileName = nodeExe,
-                // --no-open: upstream dsh web opens the default browser itself
-                // (openBrowser defaults true); the app window below is the single
-                // owner of the UI. Without this flag the URL opens twice.
-                Arguments = "\"" + dshEntry + "\" web --no-open --port " + port,
-                WorkingDirectory = Path.Combine(_root, "app"),
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            _child = Process.Start(psi);
+            _child = StartDshWeb(nodeExe, dshEntry);
 
             // Wait for the web UI to come up, then open the app window.
             var ready = WaitForHttp(_url, TimeSpan.FromSeconds(60));
+            if (!ready && _child != null && _child.HasExited)
+            {
+                // The chosen port lost the bind race: another copy grabbed it
+                // in the same instant (two different-path launches within
+                // milliseconds, both saw 3080 free). Retry once on a fresh
+                // OS-assigned port so the copy still comes up.
+                _port = GetFreePort();
+                _url = "http://127.0.0.1:" + _port + "/";
+                _child = StartDshWeb(nodeExe, dshEntry);
+                ready = WaitForHttp(_url, TimeSpan.FromSeconds(60));
+            }
             if (ready)
             {
                 BuildShell();
@@ -114,6 +128,22 @@ internal static class Program
         }
     }
 
+    // Boot dsh web on the CURRENT _port. --no-open: upstream dsh web opens the
+    // default browser itself (openBrowser defaults true); the app window is the
+    // single owner of the UI, without the flag the URL would open twice.
+    private static Process StartDshWeb(string nodeExe, string dshEntry)
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = nodeExe,
+            Arguments = "\"" + dshEntry + "\" web --no-open --port " + _port,
+            WorkingDirectory = Path.Combine(_root, "app"),
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        return Process.Start(psi);
+    }
+
     // ------------------------------------------------------------------
     // WebView2 app window (the desktop UI)
     // ------------------------------------------------------------------
@@ -132,7 +162,7 @@ internal static class Program
             // First-run default window size; the user's size is remembered in
             // data\webview2\window-state.ini and wins on later launches.
             Width = 1200,
-            Height = 800,
+            Height = 860,
             StartPosition = FormStartPosition.CenterScreen,
             // A real desktop app: minimize-to-tray instead of exiting when the
             // window is closed; the tray "退出" is the only exit path (same as
@@ -276,12 +306,13 @@ internal static class Program
     private const int SW_RESTORE = 9;
 
     // Bring the running instance's window forward from a second double-click
-    // (cross-process: same machine, same app — use a local event).
+    // (cross-process: same machine, same copy — a named event scoped to this
+    // portable's path, so copies at different paths never trigger each other).
     private static void RevealShell()
     {
         try
         {
-            using (var evt = new EventWaitHandle(false, EventResetMode.AutoReset, "DeepSeekHarnessPortable_Show"))
+            using (var evt = new EventWaitHandle(false, EventResetMode.AutoReset, _revealEvent))
             {
                 evt.Set();
             }
@@ -404,13 +435,14 @@ internal static class Program
         {
             if (e.Button == MouseButtons.Left) ShowShell();
         };
-        // Cross-process reveal listener: a second double-click sets the event;
-        // show the window and swallow it (auto-reset).
+        // Cross-process reveal listener: a second double-click of this same
+        // portable sets the per-path event; show the window and swallow it
+        // (auto-reset). Copies at other paths have their own event name.
         var revealThread = new Thread(() =>
         {
             try
             {
-                using (var evt = new EventWaitHandle(false, EventResetMode.AutoReset, "DeepSeekHarnessPortable_Show"))
+                using (var evt = new EventWaitHandle(false, EventResetMode.AutoReset, _revealEvent))
                 {
                     while (true)
                     {
@@ -460,6 +492,35 @@ internal static class Program
         try { if (_child != null && !_child.HasExited) _child.Kill(); } catch { }
     }
 
+    // FNV-1a hash of the portable root (case-insensitive): stable across runs
+    // and processes, used to scope the per-path mutex and reveal event so that
+    // copies at different paths never interfere with each other.
+    private static string StableHash(string s)
+    {
+        uint hash = 2166136261u;
+        foreach (char c in s.ToLowerInvariant())
+        {
+            hash ^= c;
+            hash *= 16777619u;
+        }
+        return hash.ToString("x8");
+    }
+
+    // OS-assigned free port on loopback — the launcher-side equivalent of
+    // node's "--port 0": bind port 0, read the assigned port, release it.
+    // dsh web must be told the concrete port (the launcher needs the URL for
+    // the app window), so node cannot pick it itself.
+    private static int GetFreePort()
+    {
+        var l = new TcpListener(IPAddress.Loopback, 0);
+        try
+        {
+            l.Start();
+            return ((IPEndPoint)l.LocalEndpoint).Port;
+        }
+        finally { l.Stop(); }
+    }
+
     private static bool PortInUse(int port)
     {
         // Bind-test with SO_REUSEADDR: on Windows this succeeds over a
@@ -497,14 +558,16 @@ internal static class Program
 
     // Whether a URL belongs to the app itself (the local dsh web server) — used
     // to keep external links out of the app window and in the system browser,
-    // mirroring how a normal browser tab would handle them.
+    // mirroring how a normal browser tab would handle them. Compares against the
+    // ACTUAL port this instance runs on (3080 or a random fallback port), not a
+    // hard-coded one.
     private static bool IsAppUrl(string uri)
     {
         try
         {
             var u = new Uri(uri);
             return u.IsLoopback
-                && (u.Port == 3080 || u.Port == -1)
+                && (u.Port == _port || u.Port == -1)
                 && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps);
         }
         catch { return false; }

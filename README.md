@@ -11,7 +11,7 @@ DeepSeek-Harness-Portable-Builder\
 ├── README.md                        # 本说明文档（构建器用法）
 ├── builder\                         # 本地构建器实现；只在构建机使用
 │   ├── source\                      # 构建脚本（入口 DeepSeek-Harness.ps1）、启动器/更新器 C# 源码、README 模板、图标、pnpm 安装上下文
-│   ├── assets\                      # 离线缓存（7zip\7za.exe、node\node-v22.23.2-win-x64.zip、git\PortableGit、pnpm），缺失时联网下载并回填缓存
+│   ├── assets\                      # 离线缓存（7zip\7za.exe、node\node-v22.23.2-win-x64.zip、git\PortableGit、pnpm、webview2\ 程序集）；前四者缺失时联网下载并回填缓存，webview2\ 缺失时构建直接失败（需手动补齐）
 │   ├── data\                        # 随包预置内容，构建时复制进成品 data\（skills、profile 补丁）
 │   └── logs\                        # 构建日志（UTF-16LE，读取需 iconv -f UTF-16LE -t UTF-8）
 ├── upstream\                        # 只读镜像：deepseek-ai 官方 dsh 源码；可同步/重置到 origin/master
@@ -82,8 +82,8 @@ DeepSeek-Harness-Portable\
 └── README.txt             # 给最终用户的说明
 ```
 
-- 界面：`DeepSeek Harness.exe` 用 **WebView2 应用窗口**（非浏览器）打开 `http://127.0.0.1:3080`；窗口标题固定、左上角为 DeepSeek 图标；关闭窗口 = 隐藏到托盘，托盘"退出"才真正退出；窗口默认 1200x800、调整后大小自动记忆（`data\webview2\window-state.ini`）；外部链接/新窗口交给系统默认浏览器打开；托盘菜单：打开界面 / 打开网页（系统默认浏览器打开同一界面）/ 检查更新 / 退出
-- 端口：固定 `http://127.0.0.1:3080`（dsh 惯例端口）；程序已在运行时再次双击会唤起已有应用窗口并置前（ForceForeground 绕过前台锁），不会启动第二个实例（无随机端口回退）
+- 界面：`DeepSeek Harness.exe` 用 **WebView2 应用窗口**（非浏览器）打开 `http://127.0.0.1:3080`；窗口标题固定、左上角为 DeepSeek 图标；关闭窗口 = 隐藏到托盘，托盘"退出"才真正退出；窗口大小可调、调整后自动记忆（`data\webview2\window-state.ini`）；外部链接/新窗口交给系统默认浏览器打开；托盘菜单：打开界面 / 打开网页（系统默认浏览器打开同一界面）/ 检查更新 / 退出
+- 端口与实例：首实例使用固定 `http://127.0.0.1:3080`（dsh 惯例端口）；**同一路径**再次双击只唤起已有窗口并置前（按路径哈希命名的 mutex 保证同路径单实例，ForceForeground 绕过前台锁），不会启动第二个实例；**整包复制到其他目录后启动**，若 3080 已被占用则自动改用系统分配的随机端口（`--port 0` 语义，启动器内解析），多份拷贝可同时并存、互不干扰（各自独立的 `data\dsh` / `data\webview2`）
 - WebView2 运行时：Evergreen 模式使用系统已装的 WebView2 Runtime（Win10/11 大多自带）；缺失时应用弹窗提示并引导安装，必要时回退到默认浏览器
 - 自愈：启动器每次启动删除 `data\dsh\profiles\node_modules`（symlink farm），dsh 启动时自动重建——便携包移动后无需任何手动修复
 - 数据随包走：`data\dsh\` 内所有用户数据跟随目录移动
@@ -101,6 +101,7 @@ DeepSeek-Harness-Portable\
 7. 启动 Update.exe（不带参数）约 4 秒后进程仍存活（窗口构建无崩溃），随后 taskkill /F；残留的 `.dsh-update-in-progress` 标记带 PID 校验，下次运行自动忽略
 8. 无头端到端（在便携包的副本上做，别动正式包）：复制 `app\` 到临时目录 → 删除 `node_modules\.modules.yaml` → 在副本内执行 `node\node.exe node\node_modules\pnpm\bin\pnpm.cjs add @deepseek-ai/dsh@latest --registry=https://registry.npmjs.org/ --config.node-linker=hoisted --config.dangerously-allow-all-builds --fetch-retries=5 --network-concurrency=8` → 退出码 0，package.json 依赖与 `bin.js --version` 均为 registry 最新版（如 0.1.1-rc.2），data\dsh 不受影响
 9. `Update.exe --check`（托盘路径）打开窗口并自动检查一次——GUI 操作，每个版本人工验证一次
+10. 多实例（2026-08-24 起行为）：解压两份副本到不同目录分别启动 → 第一份占 3080，第二份自动用随机端口，两者同时 HTTP 200 且端口不同；同路径再次双击不新增进程（只唤起窗口）。详见技能验证清单第 13 步
 
 ## 升级策略
 

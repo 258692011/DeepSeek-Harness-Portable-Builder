@@ -199,30 +199,61 @@ and silently bloat the mirror again.
   (`DeepSeek-Harness.ps1`) MUST pass `--no-open` — otherwise the URL opens
   twice (WebView2 window + dsh) and the build pops a browser on the build
   machine. The launcher is the single owner of the UI handoff.
+- **Two same-path instances must never share `data\webview2`**: WebView2
+  refuses a user data folder already in use by another process, so the
+  per-path named mutex (`DeepSeekHarnessPortable_Mutex_<fnv1a8>`,
+  `WaitOne(0)`, `AbandonedMutexException` → take over) is what stops a second
+  launcher of the same copy — the random-port fallback must NEVER be used for
+  the same path (would corrupt/conflict on the shared data dirs), only for
+  different-path copies. When editing the launcher keep the mutex and the
+  reveal event scoped to the path hash; the reveal event was previously the
+  global `DeepSeekHarnessPortable_Show` (pre-2026-08-23) and would have made
+  one copy's double-click raise EVERY copy's window.
+- **Update.exe 的 marker 只能由声称者删除（observed 2026-08-24）**:
+  `MainBody` 的 finally 曾无条件删除 `.dsh-update-in-progress`——更新进行中
+  打开一个 `--check` 窗口再关掉，会把正在更新的 marker 删掉，第三个
+  Update.exe 就能并发安装（两个 pnpm 写同一个 `app\`）。修复：只在
+  `markerClaimed` 时删除。同类问题：进程归属匹配必须用
+  `StartsWith(root + "\\")`，裸 `StartsWith(root)` 会把 `D:\portable2` 误判为
+  `D:\portable` 的实例（node/launcher 都会被误杀）。启动器侧无此问题
+  （精确路径比较 + 路径哈希命名）。
 
 ## Launcher (DeepSeek-Harness.cs) contract
 
 - winexe via `csc /target:winexe /win32icon:<ico>` — no console window.
 - Sets `DSH_HOME` to `<root>\data\dsh`, prepends `<root>\node` to PATH.
 - Deletes `data\dsh\profiles\node_modules` on start (self-heal after move). Kills the dsh web process TREE (taskkill /T /F) on exit/退出 so no orphaned workers remain.
-- **Port 3080 is canonical and single-instance**: if 3080 is already
-  LISTENING (a previous instance is running), the launcher does NOT start a
-  second server — it waits briefly for HTTP 200, signals the running
-  instance to show its window (named event `DeepSeekHarnessPortable_Show`)
-  and exits (no second node process, no second tray); the window is brought
-  to the FOREGROUND via `ForceForeground` (AttachThreadInput +
-  SetForegroundWindow — plain `Activate()` is silently refused when another
-  process owns the foreground lock, so a second double-click would land
-  BEHIND other apps); if nothing answers in
-  5 s the port is foreign-held and a warning dialog explains it. Only when
-  3080 is free does it boot `dsh web --no-open --port 3080`. No ephemeral-port fallback (a
-  second double-click must never land on a random port).
+- **Single instance PER PATH, multi-instance ACROSS paths**: single-instance is
+  enforced by a named mutex derived from the portable root
+  (`DeepSeekHarnessPortable_Mutex_<fnv1a8>`), NOT by the port — a second
+  launcher of the SAME copy never starts: it signals the running instance to
+  show its window (per-path named event `DeepSeekHarnessPortable_Show_<fnv1a8>`,
+  ForceForeground = AttachThreadInput + SetForegroundWindow, since plain
+  `Activate()` is refused when another process owns the foreground lock) and
+  exits (no second node process, no second tray). An abandoned mutex (previous
+  instance crashed) is taken over via the `AbandonedMutexException` catch, so
+  a crash never blocks the next launch. The reason the mutex is per-PATH:
+  same path = same `data\dsh` + `data\webview2`, and two processes must never
+  share the WebView2 user data folder (second process fails to init). Copies
+  launched from OTHER paths are independent instances (their own data dirs).
+- **Port 3080 canonical, random-port fallback for other copies**: the first
+  instance of any copy boots `dsh web --no-open --port 3080` when 3080 is
+  free. If 3080 is already LISTENING (a different-path copy or a foreign
+  program), the launcher does NOT fail and does NOT hijack the running
+  instance — it falls back to an OS-assigned random port via `GetFreePort()`
+  (bind port 0 on loopback, read the assigned port, release — node's `--port 0`
+  semantics, but resolved IN THE LAUNCHER because dsh web must be told the
+  concrete port and the launcher needs the URL for the app window). So N
+  copies at N different paths run side by side on N ports (first one owns
+  3080). `IsAppUrl` compares against the ACTUAL `_port`, not a hard-coded
+  3080, so external-link interception still works on the fallback port.
 - **WebView2 app window (not a browser)**: after HTTP 200 the launcher hosts
   the dsh web UI in a WebView2 WinForms window (Evergreen mode — uses the
   system WebView2 Runtime; ships only Core/WinForms DLLs + WebView2Loader,
   ~1.1 MB). Window title fixed "DeepSeek Harness" with the DeepSeek icon;
   close = hide to tray (tray 退出 is the only exit); first-run default window
-  size 1200x800 (`DeepSeek-Harness.cs` `Width`/`Height`), the user's own size
+  size from `DeepSeek-Harness.cs` `Width`/`Height` (docs do not hard-code the
+  default), the user's own size
   is remembered from then on in `data\webview2\window-state.ini`
   (`[Window] width/height`); external links
   and `target=_blank` open in the system default browser (NavigationStarting /
@@ -407,11 +438,19 @@ Update.exe smoke test (verify any release with these too):
  (tray path) opens the window and runs one check on
    load — GUI-only; verify manually once per release.
 Window behaviour (verify once per release, manually):
-11. First run: the window opens at the default 1200x800. Resize the window →
+11. First run: the window opens at the default size (`DeepSeek-Harness.cs`
+    `Width`/`Height`). Resize the window →
     close (hide to tray) → relaunch from tray 打开界面 → the size is restored
     from `data\webview2\window-state.ini`.
 12. A second double-click of `DeepSeek Harness.exe` while running only
     re-shows the existing window (single-instance reveal) AND brings it to the
     foreground (ForceForeground), no second process.
-13. Clicking an external link in the UI opens the system default browser,
+13. Multi-instance across paths: extract the zip to TWO different temp dirs
+    and launch both. The first copy owns 3080; the second (3080 busy) boots on
+    a random port — poll `netstat -ano` for two `node.exe` LISTEN entries (one
+    on 3080, one on a random port), both answer HTTP 200, and both trays exist.
+    Then double-click copy 2's exe again → no third node process, copy 2's
+    window is revealed. Kill both trees (taskkill /T /F on each launcher PID)
+    and delete the temp dirs when done.
+14. Clicking an external link in the UI opens the system default browser,
     not a navigation inside the app window.
