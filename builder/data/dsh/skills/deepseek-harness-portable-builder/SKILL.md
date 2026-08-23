@@ -167,7 +167,11 @@ and silently bloat the mirror again.
   LISTENING (a previous instance is running), the launcher does NOT start a
   second server — it waits briefly for HTTP 200, signals the running
   instance to show its window (named event `DeepSeekHarnessPortable_Show`)
-  and exits (no second node process, no second tray); if nothing answers in
+  and exits (no second node process, no second tray); the window is brought
+  to the FOREGROUND via `ForceForeground` (AttachThreadInput +
+  SetForegroundWindow — plain `Activate()` is silently refused when another
+  process owns the foreground lock, so a second double-click would land
+  BEHIND other apps); if nothing answers in
   5 s the port is foreign-held and a warning dialog explains it. Only when
   3080 is free does it boot `dsh web --no-open --port 3080`. No ephemeral-port fallback (a
   second double-click must never land on a random port).
@@ -365,6 +369,7 @@ Window behaviour (verify once per release, manually):
     close (hide to tray) → relaunch from tray 打开界面 → the size is restored
     from `data\webview2\window-state.ini`.
 12. A second double-click of `DeepSeek Harness.exe` while running only
-    re-shows the existing window (single-instance reveal), no second process.
+    re-shows the existing window (single-instance reveal) AND brings it to the
+    foreground (ForceForeground), no second process.
 13. Clicking an external link in the UI opens the system default browser,
     not a navigation inside the app window.

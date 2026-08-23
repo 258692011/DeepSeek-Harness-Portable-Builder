@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -7,6 +7,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
+using System.Runtime.InteropServices;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -238,7 +239,41 @@ internal static class Program
         _shell.Show();
         _shell.WindowState = FormWindowState.Normal;
         _shell.Activate();
+        // Activate() alone is silently refused when another process owns the
+        // Windows foreground lock (e.g. a second double-click spawns a fresh
+        // process that briefly grabs foreground, then exits) — the window then
+        // reappears BEHIND other apps. ForceForeground steals the focus.
+        ForceForeground(_shell.Handle);
     }
+
+    // Windows restricts which process may set the foreground window. The
+    // reliable workaround: attach our input queue to the current foreground
+    // thread, call SetForegroundWindow, then detach. ShowWindowAsync(SW_RESTORE)
+    // also un-minimizes the window, covering the tray-restore path.
+    private static void ForceForeground(IntPtr hWnd)
+    {
+        ShowWindowAsync(hWnd, SW_RESTORE);
+        IntPtr fg = GetForegroundWindow();
+        uint fgThread = 0;
+        if (fg != IntPtr.Zero)
+        {
+            uint fgPid;
+            fgThread = GetWindowThreadProcessId(fg, out fgPid);
+        }
+        uint thisThread = GetCurrentThreadId();
+        bool attached = fgThread != 0 && fgThread != thisThread
+            && AttachThreadInput(fgThread, thisThread, true);
+        try { SetForegroundWindow(hWnd); }
+        finally { if (attached) AttachThreadInput(fgThread, thisThread, false); }
+    }
+
+    [DllImport("user32.dll")] private static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+    [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+    private const int SW_RESTORE = 9;
 
     // Bring the running instance's window forward from a second double-click
     // (cross-process: same machine, same app — use a local event).
