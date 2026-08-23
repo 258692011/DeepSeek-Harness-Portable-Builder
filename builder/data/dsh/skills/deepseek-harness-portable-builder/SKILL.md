@@ -309,8 +309,11 @@ THIS SKILL FILE has two copies and they MUST stay byte-identical:
 Every edit via `skill_manage patch` only touches copy #1. **After any patch,
 copy it over the preinstall copy**: `cp <profile>/SKILL.md <builder-data>/SKILL.md`,
 then verify `diff` reports IDENTICAL (the preinstall copy silently
-drifted to a stale 153-line copy while the profile grew to 164 lines — a build
+diverged into a stale 153-line copy while the profile grew to 164 lines — a build
 would have shipped the old text). Rule: no patch is done until both copies match.
+
+术语约定: 两份副本或本地与远端内容不一致，一律称「差异」(divergence)，
+不要用「漂移」(drift) 之类的说法。
 
 ## Verify a release
 
