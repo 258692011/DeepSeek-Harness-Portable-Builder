@@ -1,0 +1,18 @@
+# Build outputs
+/stage/
+/dist/
+/builder/logs/
+
+# Regenerable offline caches — the build back-fills them on demand
+# (Resolve-Git / Resolve-Node / Resolve-Pnpm download + cache on first run)
+/builder/assets/git/
+/builder/assets/node/
+/builder/assets/pnpm/
+
+# Read-only upstream mirror (its own git repo — never tracked here)
+/upstream/
+
+# Windows junk
+Thumbs.db
+Desktop.ini
+*.tmp

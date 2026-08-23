@@ -7,12 +7,18 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
+using Microsoft.Web.WebView2.Core;
+using Microsoft.Web.WebView2.WinForms;
 
 internal static class Program
 {
     private static Process _child;
     private static NotifyIcon _tray;
     private static string _root;
+    private static string _url;
+    private static Form _shell;
+    private static WebView2 _web;
+    private static bool _exiting;
 
     [STAThread]
     private static int Main()
@@ -31,16 +37,22 @@ internal static class Program
 
             // The canonical dsh port: the UI always lives here. A second
             // double-click while the app is already running must not spin up
-            // a new instance on a random port — hand the browser to the
-            // running instance instead.
+            // a new instance on a random port — show the running app window instead.
             const int port = 3080;
-            string url = "http://127.0.0.1:" + port + "/";
+            _url = "http://127.0.0.1:" + port + "/";
             if (PortInUse(port))
             {
                 // The first instance may still be booting; give it a moment,
-                // then open its page and exit (no second server, no tray).
-                WaitForHttp(url, TimeSpan.FromSeconds(5));
-                Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
+                // then show its app window. If nothing answers, the port is
+                // held by some other program — say so instead of exiting
+                // silently with no window and no error.
+                bool secondReady = WaitForHttp(_url, TimeSpan.FromSeconds(5));
+                if (!secondReady)
+                {
+                    MessageBox.Show("端口 3080 已被其他程序占用，无法启动本应用。\r\n请关闭占用 3080 端口的程序后重试。",
+                        "DeepSeek Harness Portable", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                RevealShell();
                 return 0;
             }
 
@@ -63,9 +75,8 @@ internal static class Program
             {
                 FileName = nodeExe,
                 // --no-open: upstream dsh web opens the default browser itself
-                // (openBrowser defaults true); the launcher below is the single
-                // owner of the browser handoff. Without this flag the URL
-                // opens twice.
+                // (openBrowser defaults true); the app window below is the single
+                // owner of the UI. Without this flag the URL opens twice.
                 Arguments = "\"" + dshEntry + "\" web --no-open --port " + port,
                 WorkingDirectory = Path.Combine(_root, "app"),
                 UseShellExecute = false,
@@ -73,11 +84,20 @@ internal static class Program
             };
             _child = Process.Start(psi);
 
-            // Wait for the web UI to come up, then open the browser.
-            var ready = WaitForHttp(url, TimeSpan.FromSeconds(60));
-            if (ready) { Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true }); }
+            // Wait for the web UI to come up, then open the app window.
+            var ready = WaitForHttp(_url, TimeSpan.FromSeconds(60));
+            if (ready)
+            {
+                BuildShell();
+                ShowShell();
+            }
+            else
+            {
+                MessageBox.Show("dsh web 未能启动，请查看日志。\r\n" + _url,
+                    "DeepSeek Harness Portable", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
 
-            SetupTray(url);
+            SetupTray();
             Application.Run();
             return 0;
         }
@@ -88,14 +108,303 @@ internal static class Program
         }
         finally
         {
+            _exiting = true;
             KillChildTree();
         }
     }
 
+    // ------------------------------------------------------------------
+    // WebView2 app window (the desktop UI)
+    // ------------------------------------------------------------------
+
+    private static void BuildShell()
+    {
+        // Use the DeepSeek icon embedded in this exe (/win32icon:) for the
+        // title bar and taskbar — the default form icon is the generic .NET
+        // one, which reads as "wrong icon".
+        System.Drawing.Icon winIcon = null;
+        try { winIcon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
+        _shell = new Form
+        {
+            Text = "DeepSeek Harness",
+            Icon = winIcon ?? System.Drawing.SystemIcons.Application,
+            // First-run default window size; the user's size is remembered in
+            // data\webview2\window-state.ini and wins on later launches.
+            Width = 1200,
+            Height = 800,
+            StartPosition = FormStartPosition.CenterScreen,
+            // A real desktop app: minimize-to-tray instead of exiting when the
+            // window is closed; the tray "退出" is the only exit path (same as
+            // the old browser behaviour where closing the tab kept the tray).
+            ShowInTaskbar = true,
+            // dsh web is fluid, but a narrow window cramps the three-column
+            // layout (sidebar + session list + chat); keep a sane floor.
+            MinimumSize = new System.Drawing.Size(800, 600),
+        };
+        _web = new WebView2 { Dock = DockStyle.Fill };
+        _shell.Controls.Add(_web);
+        RestoreWindowState();
+
+        _shell.FormClosing += (s, e) =>
+        {
+            // Closing the window hides it to the tray, never exits the app.
+            // The only exit is the tray menu (or the explicit Shutdown).
+            if (!_exiting)
+            {
+                SaveWindowState();
+                e.Cancel = true;
+                _shell.Hide();
+            }
+        };
+
+        _shell.Load += async (s, e) =>
+        {
+            try
+            {
+                var env = await CoreWebView2Environment.CreateAsync(
+                    userDataFolder: Path.Combine(_root, "data", "webview2"),
+                    options: null);
+                await _web.EnsureCoreWebView2Async(env);
+
+                var core = _web.CoreWebView2;
+
+                // Match normal-browser behaviour: anything that navigates away
+                // from the app origin (external links, file:// from a dropped
+                // file, target=_blank popups) opens in the system default
+                // browser instead of hijacking the app window.
+                core.NewWindowRequested += (s2, e2) =>
+                {
+                    try
+                    {
+                        Process.Start(new ProcessStartInfo { FileName = e2.Uri, UseShellExecute = true });
+                    }
+                    catch { }
+                    e2.Handled = true;
+                };
+                core.NavigationStarting += (s2, e2) =>
+                {
+                    if (!IsAppUrl(e2.Uri))
+                    {
+                        try
+                        {
+                            Process.Start(new ProcessStartInfo { FileName = e2.Uri, UseShellExecute = true });
+                        }
+                        catch { }
+                        e2.Cancel = true;
+                    }
+                };
+
+                // Window title stays fixed at "DeepSeek Harness" (the tray and
+                // taskbar identity) — do NOT follow the page <title>.
+                core.Navigate(_url);
+            }
+            catch (Exception ex)
+            {
+                // WebView2 Runtime missing (or failed to init): guide the user.
+                var r = MessageBox.Show(
+                    "启动内置窗口需要 WebView2 运行时（Windows 10/11 大多自带）。\r\n\r\n" +
+                    "错误: " + ex.Message + "\r\n\r\n是否打开官方下载页？",
+                    "DeepSeek Harness Portable", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                if (r == DialogResult.Yes)
+                {
+                    try
+                    {
+                        Process.Start(new ProcessStartInfo
+                        {
+                            FileName = "https://developer.microsoft.com/microsoft-edge/webview2/",
+                            UseShellExecute = true,
+                        });
+                    }
+                    catch { }
+                }
+                // Fall back to the default browser so the app stays usable.
+                try
+                {
+                    Process.Start(new ProcessStartInfo { FileName = _url, UseShellExecute = true });
+                }
+                catch { }
+            }
+        };
+    }
+
+    private static void ShowShell()
+    {
+        if (_shell == null) return;
+        if (_shell.InvokeRequired)
+        {
+            _shell.Invoke(new Action(ShowShell));
+            return;
+        }
+        _shell.Show();
+        _shell.WindowState = FormWindowState.Normal;
+        _shell.Activate();
+    }
+
+    // Bring the running instance's window forward from a second double-click
+    // (cross-process: same machine, same app — use a local event).
+    private static void RevealShell()
+    {
+        try
+        {
+            using (var evt = new EventWaitHandle(false, EventResetMode.AutoReset, "DeepSeekHarnessPortable_Show"))
+            {
+                evt.Set();
+            }
+        }
+        catch { }
+    }
+
+    // ------------------------------------------------------------------
+    // Window state persistence (remember the user's window size)
+    // ------------------------------------------------------------------
+
+    private static string WindowStateFile
+    {
+        get { return Path.Combine(_root, "data", "webview2", "window-state.ini"); }
+    }
+
+    // Apply the previously saved window size (if any) before the window shows.
+    private static void RestoreWindowState()
+    {
+        try
+        {
+            var lines = File.ReadAllLines(WindowStateFile);
+            int w = 0, h = 0;
+            bool inWindow = false;
+            foreach (var line in lines)
+            {
+                var trimmed = line.Trim();
+                if (trimmed.Length == 0 || trimmed.StartsWith(";") || trimmed.StartsWith("#")) continue;
+                if (trimmed.StartsWith("[") && trimmed.EndsWith("]"))
+                {
+                    inWindow = string.Equals(trimmed, "[Window]", StringComparison.OrdinalIgnoreCase);
+                    continue;
+                }
+                if (!inWindow) continue;
+                var eq = trimmed.IndexOf('=');
+                if (eq <= 0) continue;
+                var key = trimmed.Substring(0, eq).Trim();
+                var value = trimmed.Substring(eq + 1).Trim();
+                int v;
+                if (!int.TryParse(value, out v)) continue;
+                if (key == "width") w = v;
+                else if (key == "height") h = v;
+            }
+            if (w >= _shell.MinimumSize.Width && h >= _shell.MinimumSize.Height)
+            {
+                _shell.Width = w;
+                _shell.Height = h;
+            }
+        }
+        catch { /* first run / unreadable state — keep the default size */ }
+    }
+
+    // Persist the current window size on hide-to-tray and on shutdown.
+    private static void SaveWindowState()
+    {
+        try
+        {
+            if (_shell == null) return;
+            string dir = Path.GetDirectoryName(WindowStateFile);
+            if (dir != null) Directory.CreateDirectory(dir);
+            File.WriteAllText(WindowStateFile,
+                "[Window]" + Environment.NewLine +
+                "width=" + _shell.Width + Environment.NewLine +
+                "height=" + _shell.Height + Environment.NewLine);
+        }
+        catch { /* best-effort; a read-only portable still works with the default size */ }
+    }
+
+    // ------------------------------------------------------------------
+    // Tray
+    // ------------------------------------------------------------------
+
+    private static void SetupTray()
+    {
+        // Use the DeepSeek icon embedded in this exe (/win32icon:) instead of
+        // the generic application icon — SystemIcons.Application shows blank.
+        System.Drawing.Icon trayIcon = null;
+        try { trayIcon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
+        _tray = new NotifyIcon
+        {
+            Icon = trayIcon ?? System.Drawing.SystemIcons.Application,
+            Text = "DeepSeek Harness",
+            Visible = true,
+        };
+        var menu = new ContextMenuStrip();
+        menu.Items.Add("打开界面", null, (s, e) => ShowShell());
+        menu.Items.Add("打开网页", null, (s, e) =>
+        {
+            // Same UI in the system default browser — handy when the WebView2
+            // Runtime is missing or the user prefers a real browser tab.
+            try
+            {
+                Process.Start(new ProcessStartInfo { FileName = _url, UseShellExecute = true });
+            }
+            catch { }
+        });
+        menu.Items.Add("检查更新", null, (s, e) =>
+        {
+            // Fire-and-forget check: Update.exe --check only queries the
+            // registry and shows a dialog; it is safe while we are running.
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = Path.Combine(_root, "Update.exe"),
+                    Arguments = "--check",
+                    WorkingDirectory = _root,
+                    UseShellExecute = true,
+                };
+                Process.Start(psi);
+            }
+            catch { }
+        });
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("退出", null, (s, e) => Shutdown());
+        _tray.ContextMenuStrip = menu;
+        // Left single-click shows the window (double-click on a tray icon is
+        // the historical default, but single-click is the expected gesture).
+        _tray.MouseClick += (s, e) =>
+        {
+            if (e.Button == MouseButtons.Left) ShowShell();
+        };
+        // Cross-process reveal listener: a second double-click sets the event;
+        // show the window and swallow it (auto-reset).
+        var revealThread = new Thread(() =>
+        {
+            try
+            {
+                using (var evt = new EventWaitHandle(false, EventResetMode.AutoReset, "DeepSeekHarnessPortable_Show"))
+                {
+                    while (true)
+                    {
+                        evt.WaitOne();
+                        ShowShell();
+                    }
+                }
+            }
+            catch { /* the named event is per-session; a miss is fine */ }
+        });
+        revealThread.IsBackground = true;
+        revealThread.Start();
+    }
+
+    private static void Shutdown()
+    {
+        _exiting = true;
+        SaveWindowState(); // the window may never have been closed (hide-to-tray)
+        try { if (_tray != null) _tray.Visible = false; } catch { }
+        Application.Exit();
+    }
+
+    // ------------------------------------------------------------------
+    // Process tree management
+    // ------------------------------------------------------------------
+
     // Kill the dsh web process AND its whole subtree: a plain _child.Kill()
     // leaves orphaned grandchildren (code-runtime workers, ripgrep, …) alive
-    // holding files — taskkill /T /F is the reliable tree kill on Windows
-    // (2026-08-22).
+    // holding files — taskkill /T /F is the reliable tree kill on Windows.
     private static void KillChildTree()
     {
         try
@@ -151,54 +460,18 @@ internal static class Program
         return false;
     }
 
-    private static void SetupTray(string url)
+    // Whether a URL belongs to the app itself (the local dsh web server) — used
+    // to keep external links out of the app window and in the system browser,
+    // mirroring how a normal browser tab would handle them.
+    private static bool IsAppUrl(string uri)
     {
-        // Use the DeepSeek icon embedded in this exe (/win32icon:) instead of
-        // the generic application icon — SystemIcons.Application shows blank.
-        System.Drawing.Icon trayIcon = null;
-        try { trayIcon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
-        _tray = new NotifyIcon
+        try
         {
-            Icon = trayIcon ?? System.Drawing.SystemIcons.Application,
-            Text = "DeepSeek Harness",
-            Visible = true,
-        };
-        var menu = new ContextMenuStrip();
-        menu.Items.Add("打开界面", null, (s, e) =>
-            Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true }));
-        menu.Items.Add("检查更新", null, (s, e) =>
-        {
-            // Fire-and-forget check: Update.exe --check only queries the
-            // registry and shows a dialog; it is safe while we are running.
-            try
-            {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = Path.Combine(_root, "Update.exe"),
-                    Arguments = "--check",
-                    WorkingDirectory = _root,
-                    UseShellExecute = true,
-                };
-                Process.Start(psi);
-            }
-            catch { }
-        });
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("退出", null, (s, e) =>
-        {
-            KillChildTree();
-            _tray.Visible = false;
-            Application.Exit();
-        });
-        _tray.ContextMenuStrip = menu;
-        // Left single-click opens the UI (double-click on a tray icon is the
-        // historical default, but single-click is the expected gesture now).
-        _tray.MouseClick += (s, e) =>
-        {
-            if (e.Button == MouseButtons.Left)
-            {
-                Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
-            }
-        };
+            var u = new Uri(uri);
+            return u.IsLoopback
+                && (u.Port == 3080 || u.Port == -1)
+                && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps);
+        }
+        catch { return false; }
     }
 }

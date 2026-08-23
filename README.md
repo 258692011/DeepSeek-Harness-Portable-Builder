@@ -47,7 +47,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; & 'D:\DeepSeek-Harness-Portable-Builder\builder\source\DeepSeek-Harness.ps1' *>&1 | Tee-Object -FilePath 'D:\DeepSeek-Harness-Portable-Builder\builder\logs\build-<时间戳>.log'"
 ```
 
-构建流程（约 2-4 分钟）：
+构建流程（约 3-5 分钟）：
 
 1. 校验 `upstream\` 存在且为官方仓库
 2. 清空并重建 `stage\DeepSeek-Harness-Portable\`
@@ -59,10 +59,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[Console]::OutputEnc
 
 ## 同步 upstream
 
-构建前建议先同步（upstream 是只读镜像，可随时重置）：
+构建前建议先同步（upstream 是只读镜像，可随时重置；自 2026-08-23 起为
+**depth-1 浅克隆**，`.git` ~150MB+ → 19MB，勿改回全量 fetch，否则镜像会被重新撑大）：
 
 ```powershell
-git -C "D:/DeepSeek-Harness-Portable-Builder/upstream" fetch --prune origin
+git -C "D:/DeepSeek-Harness-Portable-Builder/upstream" fetch --depth 1 --no-tags origin master
 git -C "D:/DeepSeek-Harness-Portable-Builder/upstream" reset --hard origin/master
 ```
 
@@ -72,15 +73,18 @@ git -C "D:/DeepSeek-Harness-Portable-Builder/upstream" reset --hard origin/maste
 
 ```
 DeepSeek-Harness-Portable\
-├── DeepSeek Harness.exe   # 无窗口启动器：设 DSH_HOME → 启 dsh web → 开浏览器 → 托盘驻留
+├── DeepSeek Harness.exe   # 应用启动器：设 DSH_HOME → 启 dsh web → WebView2 应用窗口打开界面 → 托盘驻留
 ├── Update.exe             # 更新器（窗口界面）：包内 pnpm 快速升级 dsh，数据不动（见"升级策略"）
 ├── node\                  # Node v22.23.2 便携运行时
 ├── app\                   # @deepseek-ai/dsh（hoisted 实体化 node_modules，可归档迁移）
-├── data\dsh\              # DSH_HOME 用户数据（profiles/storages，首次运行生成）
+├── data\dsh\              # DSH_HOME 用户数据（预置 skills/profile 补丁；profiles/storages 首次运行生成）
+├── Microsoft.Web.WebView2.*.dll + WebView2Loader.dll   # WebView2 应用窗口所需程序集（Evergreen 模式）
 └── README.txt             # 给最终用户的说明
 ```
 
-- 端口：固定 `http://127.0.0.1:3080`（dsh 惯例端口）；程序已在运行时再次双击只会打开该地址，不会启动第二个实例（无随机端口回退）
+- 界面：`DeepSeek Harness.exe` 用 **WebView2 应用窗口**（非浏览器）打开 `http://127.0.0.1:3080`；窗口标题固定、左上角为 DeepSeek 图标；关闭窗口 = 隐藏到托盘，托盘"退出"才真正退出；窗口默认 1200x800、调整后大小自动记忆（`data\webview2\window-state.ini`）；外部链接/新窗口交给系统默认浏览器打开；托盘菜单：打开界面 / 打开网页（系统默认浏览器打开同一界面）/ 检查更新 / 退出
+- 端口：固定 `http://127.0.0.1:3080`（dsh 惯例端口）；程序已在运行时再次双击会唤起已有应用窗口，不会启动第二个实例（无随机端口回退）
+- WebView2 运行时：Evergreen 模式使用系统已装的 WebView2 Runtime（Win10/11 大多自带）；缺失时应用弹窗提示并引导安装，必要时回退到默认浏览器
 - 自愈：启动器每次启动删除 `data\dsh\profiles\node_modules`（symlink farm），dsh 启动时自动重建——便携包移动后无需任何手动修复
 - 数据随包走：`data\dsh\` 内所有用户数据跟随目录移动
 
@@ -89,10 +93,10 @@ DeepSeek-Harness-Portable\
 解压到临时目录后按发布验证清单执行（完整细节见技能 `deepseek-harness-portable-builder`）：
 
 1. CLI 版本：`node\node.exe app\node_modules\@deepseek-ai\dsh\lib\bin.js --version` → 输出版本号
-2. 运行 `DeepSeek Harness.exe`，轮询 `http://127.0.0.1:3080/` → HTTP 200，页面标题 `<title>DeepSeek Harness</title>`
+2. 运行 `DeepSeek Harness.exe`，轮询 `http://127.0.0.1:3080/` → HTTP 200；应用窗口出现（标题 "DeepSeek Harness"、左上角 DeepSeek 图标），`data\webview2\EBWebView` 生成；无浏览器进程被弹出
 3. 自愈检查：`data\dsh\profiles\node_modules\@deepseek-ai` → 约 195 个 junction 条目（启动后自动重建）
 4. 图标：可从 DeepSeek Harness.exe 提取 32x32 图标
-5. 归档校验：`7za t` → "Everything is Ok"；`data\dsh` 只含预置内容（`profiles\web\cordis.patch.yml` + 官方脚手架、`skills\`），无探针生成的 junction farm 与 `storages`
+5. 归档校验：`7za t` → "Everything is Ok"；`data\dsh` 只含预置内容（`profiles\web\cordis.patch.yml` + 官方脚手架、`skills\`），无探针生成的 junction farm、`storages` 与 `data\webview2`（测试残留归档前整目录清除）
 6. Update.exe 为窗口版：其 UTF-16 字符串含 检查更新 / 立即更新 / 发现新版本（旧版 MessageBox 流程已移除）
 7. 启动 Update.exe（不带参数）约 4 秒后进程仍存活（窗口构建无崩溃），随后 taskkill /F；残留的 `.dsh-update-in-progress` 标记带 PID 校验，下次运行自动忽略
 8. 无头端到端（在便携包的副本上做，别动正式包）：复制 `app\` 到临时目录 → 删除 `node_modules\.modules.yaml` → 在副本内执行 `node\node.exe node\node_modules\pnpm\bin\pnpm.cjs add @deepseek-ai/dsh@latest --registry=https://registry.npmjs.org/ --config.node-linker=hoisted --config.dangerously-allow-all-builds --fetch-retries=5 --network-concurrency=8` → 退出码 0，package.json 依赖与 `bin.js --version` 均为 registry 最新版（如 0.1.1-rc.2），data\dsh 不受影响
@@ -106,7 +110,7 @@ dsh 是 RC 阶段、破坏性变更频繁。升级分两种情况：
 双击包根目录的 `Update.exe` 打开更新窗口:
 - 窗口显示 当前版本 / 最新版本 / 状态;点击"检查更新"查询 registry(启动时不做任何自动检查)
 - 更新前先用包内 node 探测 registry.npmjs.org 连通性(6 秒超时),网络/代理不通秒级报原因,不用干等 pnpm 重试;失败输出自动分类(网络/DNS/权限)
-- 发现新版本后点击"立即更新":包内 pnpm(`pnpm add @deepseek-ai/dsh@latest`,带重试/降并发参数,代理不稳也能扛;`--config.minimum-release-age=0` 关闭 pnpm 的"新包需满 1 天"策略,否则刚发布的版本会被静默解析回旧版)→ 窗口内实时日志(无进度条,日志即进度)→ 弹框确认是否立即重启(是=重启并自动打开网页)(pnpm 打印 `Done in` 后进程可能赖着不退,更新器检测到完成标记后若进程未退出立即杀进程树(实测 Done 后通常 0.1s 自然退出;无需硬超时,失败由退出码/版本校验兜底))
+- 发现新版本后点击"立即更新":包内 pnpm(`pnpm add @deepseek-ai/dsh@latest`,带重试/降并发参数,代理不稳也能扛;`--config.minimum-release-age=0` 关闭 pnpm 的"新包需满 1 天"策略,否则刚发布的版本会被静默解析回旧版)→ 窗口内实时日志(无进度条,日志即进度)→ 弹框确认是否立即重启(是=重启并打开应用窗口)(pnpm 打印 `Done in` 后进程可能赖着不退,更新器检测到完成标记后若进程未退出立即杀进程树(实测 Done 后通常 0.1s 自然退出;无需硬超时,失败由退出码/版本校验兜底))
 - 只动 `app\node_modules`(含 pnpm-lock.yaml),用户数据 `data\dsh\` 原样保留
 - 点击"立即更新"自动停止本目录运行的 DeepSeek Harness.exe / node 进程(杀进程树,托盘图标随之消失),其他目录的实例不触碰;无需手动退出
 - 失败在窗口内显示(日志: `data\dsh\logs\Update-exe-diagnostic.log`)

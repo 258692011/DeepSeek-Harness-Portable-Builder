@@ -765,7 +765,7 @@ internal static class Program
                     _btnCheck.Enabled = false;
                     _btnUpdate.Enabled = false;
                     // Ask before restarting: the user may be busy. On "是" the
-                    // launcher boots the web UI and opens the browser itself
+                    // launcher boots the web UI and shows the WebView2 window
                     // (waits for HTTP 200 first — no open-page race here).
                     DialogResult rr = MessageBox.Show(
                         "更新完成：" + newVer + "\n\n是否立即重启 DeepSeek Harness？",

@@ -26,10 +26,11 @@ Portable layout (what ships):
 
 ```
 DeepSeek-Harness-Portable\
-├── DeepSeek Harness.exe  # C# winexe launcher: no console window, tray icon, opens browser
+├── DeepSeek Harness.exe  # C# winexe launcher: no console, tray icon, WebView2 app window (not a browser)
+├── Microsoft.Web.WebView2.Core.dll / .WinForms.dll / WebView2Loader.dll  # WebView2 (Evergreen) assemblies, ~1.1 MB
 ├── node\          # portable Node v22.23.2 (zip from builder\assets\node)
 ├── app\           # @deepseek-ai/dsh installed with node-linker=hoisted (flat, symlink-free)
-├── data\dsh\      # DSH_HOME: profiles/storages, created on first run (empty in release)
+├── data\dsh\      # DSH_HOME: preinstalled skills + profile patches; profiles/storages created on first run
 └── README.txt
 ```
 
@@ -50,7 +51,7 @@ DeepSeek-Harness-Portable\
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; & 'D:\DeepSeek-Harness-Portable-Builder\builder\source\DeepSeek-Harness.ps1' *>&1 | Tee-Object -FilePath 'D:\DeepSeek-Harness-Portable-Builder\builder\logs\build-<stamp>.log'"
 ```
 
-Run in background + notify_on_complete (build ≈ 2-4 min: install 30s + archive).
+Run in background + notify_on_complete (build ≈ 3-5 min: pnpm install ~1.5 min + archive).
 Script steps: assert upstream → wipe stage → Resolve-Node (**pinned v22.23.2**;
 own assets → exact-URL download if missing) → Resolve-Pnpm (**pinned 11.21.0**,
 builder cache only — never the system pnpm; bundled-npm install back-fills the
@@ -67,11 +68,21 @@ verify.
 ## Sync upstream (every build)
 
 ```powershell
-git -C "D:/DeepSeek-Harness-Portable-Builder/upstream" fetch --prune origin
+git -C "D:/DeepSeek-Harness-Portable-Builder/upstream" fetch --depth 1 --no-tags origin master
 git -C "D:/DeepSeek-Harness-Portable-Builder/upstream" reset --hard origin/master
 ```
 
-upstream = read-only mirror of `https://github.com/deepseek-ai/deepseek-harness.git`.
+upstream = read-only mirror of `https://github.com/deepseek-ai/deepseek-harness.git`
+— a **depth-1 SHALLOW mirror since 2026-08-23** (`.git` ~150MB+ → 19MB;
+216MB → 83MB total). The build never needs history or tags — no
+`git describe`/`--tags`/`rev-list` in DeepSeek-Harness.ps1, and the version
+comes from `upstream\package.json`. Conversion recipe (verified in place):
+`fetch --depth 1 --no-tags origin master` → `reset --hard origin/master` →
+`remote remove origin` + re-add by URL (drops every origin/* ref keeping old
+history reachable) → delete ALL local tags → `reflog expire --expire=now
+--all` → `gc --prune=now --aggressive`. KEEP the shallow flags on every
+sync: a plain `fetch --prune origin` would fetch every branch at full depth
+and silently bloat the mirror again.
 
 ## Pitfalls
 
@@ -111,8 +122,14 @@ upstream = read-only mirror of `https://github.com/deepseek-ai/deepseek-harness.
   MUST NOT ship**: 7za follows junctions into the archive (400MB+ bloat; the
   extracted real tree then trips dsh's `healProfilesModuleFallback`
   "exists and is not a symlink" error on boot). Clear `data\dsh\*` BEFORE
-  archiving (Remove-Item -Recurse is unreliable on junction trees → fall back
+  (`Remove-Item -Recurse` is unreliable on junction trees → fall back
   to `subst` + `cmd /d /c rd /s /q`). Launcher self-heals on start anyway.
+- **Test-generated `data\webview2` must not ship either**: a manual launcher
+  run inside the stage (e.g. testing the WebView2 window) leaves the full
+  EBWebView profile — History/Cache/GPUCache/Local Storage/window-state.ini,
+  hundreds of files including the tester's browsing data. The pre-archive
+  cleanup wipes the whole `data\webview2` dir (no preinstalled content lives
+  there; the launcher recreates it on first start).
 - **Stale node/DeepSeek Harness processes hold the stage**: before rebuild, kill
   `node.exe` + `DeepSeek Harness.exe` (a shell whose cwd sits inside stage also blocks
   deletion; `Remove-Item` from PowerShell with an explicit path works when
@@ -138,7 +155,8 @@ upstream = read-only mirror of `https://github.com/deepseek-ai/deepseek-harness.
   defaults `openBrowser: true` and pops the browser on service-ready. Both the
   launcher (`DeepSeek-Harness.cs`) and the build web probe
   (`DeepSeek-Harness.ps1`) MUST pass `--no-open` — otherwise the URL opens
-  twice (launcher + dsh) and the build pops a browser on the build machine.
+  twice (WebView2 window + dsh) and the build pops a browser on the build
+  machine. The launcher is the single owner of the UI handoff.
 
 ## Launcher (DeepSeek-Harness.cs) contract
 
@@ -147,15 +165,29 @@ upstream = read-only mirror of `https://github.com/deepseek-ai/deepseek-harness.
 - Deletes `data\dsh\profiles\node_modules` on start (self-heal after move). Kills the dsh web process TREE (taskkill /T /F) on exit/退出 so no orphaned workers remain.
 - **Port 3080 is canonical and single-instance**: if 3080 is already
   LISTENING (a previous instance is running), the launcher does NOT start a
-  second server — it waits briefly for HTTP 200, opens
-  `http://127.0.0.1:3080/` directly and exits (no second node process, no
-  second tray). Only when 3080 is free does it boot
-  `dsh web --no-open --port 3080`. No ephemeral-port fallback (a second
-  double-click must never land on a random port).
-- Waits for HTTP 200, opens default browser, tray icon with 打开/退出.
-- Icon: upstream `apps/web/public/favicon.svg` (official DeepSeek whale) →
-  sharp (from app node_modules) → PNG 256 → PIL multi-size ICO →
-  `builder\source\DeepSeek-Harness.ico`.
+  second server — it waits briefly for HTTP 200, signals the running
+  instance to show its window (named event `DeepSeekHarnessPortable_Show`)
+  and exits (no second node process, no second tray); if nothing answers in
+  5 s the port is foreign-held and a warning dialog explains it. Only when
+  3080 is free does it boot `dsh web --no-open --port 3080`. No ephemeral-port fallback (a
+  second double-click must never land on a random port).
+- **WebView2 app window (not a browser)**: after HTTP 200 the launcher hosts
+  the dsh web UI in a WebView2 WinForms window (Evergreen mode — uses the
+  system WebView2 Runtime; ships only Core/WinForms DLLs + WebView2Loader,
+  ~1.1 MB). Window title fixed "DeepSeek Harness" with the DeepSeek icon;
+  close = hide to tray (tray 退出 is the only exit); first-run default window
+  size 1200x800 (`DeepSeek-Harness.cs` `Width`/`Height`), the user's own size
+  is remembered from then on in `data\webview2\window-state.ini`
+  (`[Window] width/height`); external links
+  and `target=_blank` open in the system default browser (NavigationStarting /
+  NewWindowRequested interception); WebView2 data under `data\webview2`
+  (portable). Missing Runtime → dialog guiding to the official download page,
+  then browser fallback.
+- Icon: `builder\source\DeepSeek-Harness.ico` is a COMMITTED asset (generated
+  once from upstream `apps/web/public/favicon.svg` via sharp → PNG 256 → PIL
+  multi-size ICO; the build itself never regenerates it). The build embeds it
+  via `/win32icon:`; the tray and window title bar load it via
+  ExtractAssociatedIcon.
 
 ## In-place updater (Update.exe)
 
@@ -177,10 +209,10 @@ upstream = read-only mirror of `https://github.com/deepseek-ai/deepseek-harness.
   --config.node-linker=hoisted --config.dangerously-allow-all-builds
   --fetch-retries=5 --network-concurrency=8 --config.minimum-release-age=0` (npm fallback: `npm install ...
   --no-audit --no-fund --fetch-retries=5`) with a live streaming log box
-  (real-time output; the log IS the progress view, no marquee bar); verifies via `bin.js --version`; **asks 是否立即重启 (MessageBox Yes/No) on success — relaunches on 是, and the launcher then opens the browser**;
-  **auto-relaunches DeepSeek Harness.exe** on success; user data `data\dsh`
+  (real-time output; the log IS the progress view, no marquee bar); verifies via `bin.js --version`; **on success asks 是否立即重启 (MessageBox Yes/No) — relaunches DeepSeek Harness.exe on 是, and the launcher then shows the WebView2 window**; user data `data\dsh`
   untouched.
-- **pnpm blocks fresh releases (minimumReleaseAge)**: pnpm 11's supply-chain policy refuses packages younger than 1 day (default `minimum-release-age=1440`). A just-published dsh makes `pnpm add @deepseek-ai/dsh@latest` silently resolve @latest to the previous version and print "Done" without changing anything (rc.2 stayed rc.1, version guard fired 更新失败). Both the build and Update.exe pass `--config.minimum-release-age=0`.- **pnpm prints "Done" but can linger**: the pnpm process tree may keep running after "Done in Xs using pnpm" (post-run network chatter / a lingering child — Update.exe waited forever on a flaky proxy). The updater detects the "Done in ... using pnpm" marker, kills the tree immediately (no grace) once the marker is seen — pnpm normally exits ~0.1s after Done, but may linger forever; so the instant it has not exited after Done, it is killed, and then kills the whole tree (taskkill /T /F) and proceeds — the `bin.js --version` check is the real gate. No hard timeout is needed: the stream either exits normally, hits a non-zero exit (shown as 更新失败), or is grace-killed after the marker (the post-install `bin.js --version` check is the gate).
+- **pnpm blocks fresh releases (minimumReleaseAge)**: pnpm 11's supply-chain policy refuses packages younger than 1 day (default `minimum-release-age=1440`). A just-published dsh makes `pnpm add @deepseek-ai/dsh@latest` silently resolve @latest to the previous version and print "Done" without changing anything (rc.2 stayed rc.1, version guard fired 更新失败). Both the build and Update.exe pass `--config.minimum-release-age=0`.
+- **pnpm prints "Done" but can linger**: the pnpm process tree may keep running after "Done in Xs using pnpm" (post-run network chatter / a lingering child — Update.exe waited forever on a flaky proxy). The updater detects the "Done in ... using pnpm" marker, kills the tree immediately (no grace) once the marker is seen — pnpm normally exits ~0.1s after Done, but may linger forever; so the instant it has not exited after Done, it is killed, and then kills the whole tree (taskkill /T /F) and proceeds — the `bin.js --version` check is the real gate. No hard timeout is needed: the stream either exits normally, hits a non-zero exit (shown as 更新失败), or is grace-killed after the marker (the post-install `bin.js --version` check is the gate).
 - **Pre-flight network probe + failure classification**: before the install,
   Update.exe probes registry.npmjs.org through the SAME bundled node the
   installer uses (https.get, 6s timeout — a .NET HttpWebRequest probe
@@ -188,7 +220,8 @@ upstream = read-only mirror of `https://github.com/deepseek-ai/deepseek-harness.
   seconds with a clear reason (超时/DNS/拒绝/代理) instead of minutes of pnpm
   retries. Install/check failures are classified from the raw output (网络 /
   DNS / 403 权限) into user-facing causes, mirroring the Hermes updater's
-  ClassifyUpdateError.- **`add`, never `install`**: `pnpm install <spec>` silently reinstalls the
+  ClassifyUpdateError.
+- **`add`, never `install`**: `pnpm install <spec>` silently reinstalls the
   existing spec and leaves the tree at the old version — the
   updater uses `pnpm add`. A post-install version check against the registry's
   "latest" fails loudly if the tree did not actually change.
@@ -215,7 +248,9 @@ upstream = read-only mirror of `https://github.com/deepseek-ai/deepseek-harness.
 - Re-entrancy marker `data\dsh\.dsh-update-in-progress` (PID, stale-safe; `--check` never claims it — read-only, so tray checks work while the window is open);
   automatically stops this portable's own launcher/web processes before updating (taskkill /T /F — the tray icon disappears with the launcher); instances from other directories are never touched; diagnostic log
   `data\dsh\logs\Update-exe-diagnostic.log`.
-- Launcher tray menu: 打开界面 / **检查更新** (spawns Update.exe --check)
+- Launcher tray menu: 打开界面 / **打开网页** (opens the same UI in the
+  system default browser — useful when the WebView2 Runtime is missing or the
+  user prefers a real browser tab) / 检查更新 (spawns Update.exe --check)
   / 退出.
 - C# gotchas: MessageBox.Show returns `DialogResult` (declare `DialogResult
   r =`); write the .cs with UTF-8 BOM (PowerShell 5.1 ANSI-mangles CJK in
@@ -239,7 +274,8 @@ back-filled (no cross-builder fallback):
   (`Assert-Upstream` status/rev-parse) and **never consults the system git**
   (previously the build machine had to have any git
   preinstalled). Missing → download the pinned release, extract to temp, and
-  back-fill the unpacked cache dir.- `builder\assets\pnpm\` — cached **pnpm@11.21.0 install** (pinned): the `pnpm`
+  back-fill the unpacked cache dir.
+- `builder\assets\pnpm\` — cached **pnpm@11.21.0 install** (pinned): the `pnpm`
   package dir (self-contained, all deps bundled inside `node_modules\pnpm`)
   plus the `pnpm.cmd`/`pnpm.ps1`/`pnpx.*` shims. `Resolve-Pnpm` **never uses
   the system pnpm** — it restores from this cache, or (first build) installs
@@ -280,21 +316,27 @@ would have shipped the old text). Rule: no patch is done until both copies match
 
 Extract to a fresh temp dir, then:
 1. `node\node.exe app\node_modules\@deepseek-ai\dsh\lib\bin.js --version` → version
-2. Run `DeepSeek Harness.exe`, poll `http://127.0.0.1:3080/` → HTTP 200, `<title>DeepSeek Harness</title>`
-3. `data\dsh\profiles\node_modules\@deepseek-ai` → ~195 junction entries (self-healed)
-4. Icon extractable from DeepSeek Harness.exe (32x32).
-5. `7za t` the zip: "Everything is Ok"; `data\dsh` contains ONLY preinstalled
+2. Run `DeepSeek Harness.exe`, poll `http://127.0.0.1:3080/` → HTTP 200; a WebView2
+   app window appears (title "DeepSeek Harness", DeepSeek icon in the title bar),
+   `data\webview2\EBWebView` is created, and NO default-browser process is
+   spawned (the launcher owns the UI handoff).
+3. WebView2 assemblies ship beside the launcher: `Microsoft.Web.WebView2.Core.dll`,
+   `Microsoft.Web.WebView2.WinForms.dll`, `WebView2Loader.dll` present at the
+   portable root.
+4. `data\dsh\profiles\node_modules\@deepseek-ai` → ~195 junction entries (self-healed)
+5. Icon extractable from DeepSeek Harness.exe (32x32).
+6. `7za t` the zip: "Everything is Ok"; `data\dsh` contains ONLY preinstalled
    content (`profiles\web\cordis.patch.yml` + the official scaffold files,
-   `skills\...`) — no probe-generated junction farm (`profiles\node_modules`)
-   and no `storages`.
+   `skills\...`) — no probe-generated junction farm (`profiles\node_modules`),
+   no `storages`, and no `data\webview2` (test-run residue is wiped pre-archive).
 Update.exe smoke test (verify any release with these too):
-6. Update.exe at the portable root is the WINDOW build: its UTF-16 strings
+7. Update.exe at the portable root is the WINDOW build: its UTF-16 strings
    contain 检查更新 / 立即更新 / 发现新版本 (window UI — the old
    MessageBox-driven flow is gone).
-7. Launch Update.exe (plain) and confirm the process is still alive after 4s
+8. Launch Update.exe (plain) and confirm the process is still alive after 4s
    (window constructed without crashing), then taskkill /F it. The stale
    .dsh-update-in-progress marker is PID-checked and ignored on next run.
-8. Headless end-to-end of the update command chain in a COPY of the portable
+9. Headless end-to-end of the update command chain in a COPY of the portable
    (never the live one): copy 
 `app\`
  to a temp dir, delete
@@ -311,7 +353,15 @@ Update.exe smoke test (verify any release with these too):
 `bin.js --version`
  both equal the registry latest (e.g. 0.1.1-rc.2), and
    data\dsh untouched.
-9. 
+10. 
 `Update.exe --check`
  (tray path) opens the window and runs one check on
    load — GUI-only; verify manually once per release.
+Window behaviour (verify once per release, manually):
+11. First run: the window opens at the default 1200x800. Resize the window →
+    close (hide to tray) → relaunch from tray 打开界面 → the size is restored
+    from `data\webview2\window-state.ini`.
+12. A second double-click of `DeepSeek Harness.exe` while running only
+    re-shows the existing window (single-instance reveal), no second process.
+13. Clicking an external link in the UI opens the system default browser,
+    not a navigation inside the app window.

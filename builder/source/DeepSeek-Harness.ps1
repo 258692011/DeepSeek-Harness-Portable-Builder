@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$BuilderRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [switch]$SkipArchive
 )
@@ -348,10 +348,28 @@ if (-not (Test-Path $launcherIcon)) { throw "Launcher icon missing: $launcherIco
 # name users see in Explorer and in Update.exe's process checks.
 $launcherOut = Join-Path $Stage 'DeepSeek Harness.exe'
 Ensure-Utf8Bom (Join-Path $SourceDir 'DeepSeek-Harness.cs')
+# WebView2 shell: the launcher hosts the dsh web UI in a desktop window via
+# the WebView2 WinForms control (Evergreen mode — the system WebView2 Runtime
+# is used; only the three small assemblies ship with the portable). The
+# managed DLLs target .NET Framework 4.6.2; csc 4.0 compiles against them and
+# Windows 10/11 runtimes satisfy them (4.8).
+$webView2Dir = Join-Path $Builder 'assets\webview2'
+$webView2Core = Join-Path $webView2Dir 'Microsoft.Web.WebView2.Core.dll'
+$webView2WinForms = Join-Path $webView2Dir 'Microsoft.Web.WebView2.WinForms.dll'
+$webView2Loader = Join-Path $webView2Dir 'WebView2Loader.dll'
+foreach ($wv2 in @($webView2Core, $webView2WinForms, $webView2Loader)) {
+    if (-not (Test-Path $wv2)) { throw "WebView2 asset missing: $wv2" }
+}
 Invoke-NativeChecked 'DeepSeek Harness launcher compilation' {
-    & $csc /nologo /target:winexe /platform:anycpu /optimize+ "/win32icon:$launcherIcon" "/out:`"$launcherOut`"" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll (Join-Path $SourceDir 'DeepSeek-Harness.cs')
+    & $csc /nologo /target:winexe /platform:anycpu /optimize+ "/win32icon:$launcherIcon" "/out:`"$launcherOut`"" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll "/reference:$webView2Core" "/reference:$webView2WinForms" (Join-Path $SourceDir 'DeepSeek-Harness.cs')
 }
 if (-not (Test-Path $launcherOut)) { throw 'DeepSeek Harness.exe was not produced.' }
+# WebView2 assemblies ship beside the launcher (same directory — the .NET
+# loader resolves them from the exe dir; WebView2Loader.dll is the native
+# Evergreen loader).
+Copy-Item $webView2Core $Stage -Force
+Copy-Item $webView2WinForms $Stage -Force
+Copy-Item $webView2Loader $Stage -Force
 
 Copy-Item (Join-Path $SourceDir 'README.txt') (Join-Path $Stage 'README.txt') -Force
 
@@ -491,6 +509,29 @@ if (-not $SkipArchive) {
             }
         }
         Write-Host 'Cleared probe-generated dsh data (profiles farm/storages); kept preinstalled skills and profile patches.'
+    }
+
+    # A manual launcher run in the stage (e.g. testing the WebView2 window)
+    # leaves a full browser profile under data\webview2 (EBWebView: History,
+    # Cache, GPUCache, Local Storage, window-state.ini, …) — hundreds of files
+    # including the tester's browsing data. It is runtime junk and must not
+    # ship; the launcher recreates it on first start, and no preinstalled
+    # content lives under data\webview2, so the whole directory goes.
+    $webView2Data = Join-Path $Stage 'data\webview2'
+    if (Test-Path $webView2Data) {
+        Remove-Item $webView2Data -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path $webView2Data) {
+            # Defensive fallback (a junction would survive Remove-Item).
+            $parent = Split-Path $webView2Data -Parent
+            $leaf = Split-Path $webView2Data -Leaf
+            foreach ($letter in 'H','G','F','I','J') {
+                if (Test-Path "${letter}:\") { continue }
+                subst "${letter}:" $parent | Out-Null
+                try { cmd.exe /d /c "rd /s /q ${letter}:\$leaf" | Out-Null } finally { subst "${letter}:" /d | Out-Null }
+                break
+            }
+        }
+        Write-Host 'Removed test-generated data\webview2 (runtime browser profile must not ship).'
     }
 
     # The hoisted app\node_modules carries a .modules.yaml whose storeDir /
