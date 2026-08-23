@@ -55,8 +55,7 @@ How to record:
    the profile master (this file) and the 随包预置副本
    `D:\DeepSeek-Harness-Portable-Builder\builder\data\dsh\skills\deepseek-harness-portable-builder\SKILL.md`.
    Patch the profile copy, copy it over the preinstall copy, verify `diff`
-   reports IDENTICAL, and if the change touches the builder repo, commit+push
-   it.
+   reports IDENTICAL.
 4. **Scope**: record only lessons that would save time if the same mistake
    recurs (project-specific, non-trivial, cost real time). Do not record
    one-off trivia, task progress, or anything stale in a week. When unsure
