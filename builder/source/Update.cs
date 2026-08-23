@@ -424,7 +424,7 @@ internal static class Program
             var info = _infoPanel;
             _lblCurrent = new Label { Text = "当前版本：" + (_current ?? "未知"), AutoSize = false, Location = new Point(8, 8), Size = new Size(604, 18), TextAlign = ContentAlignment.MiddleLeft };
             _lblLatest = new Label { Text = "最新版本：—", AutoSize = false, Location = new Point(8, 28), Size = new Size(604, 18), TextAlign = ContentAlignment.MiddleLeft };
-            _lblStatus = new Label { Text = "就绪：点击“检查更新”", AutoSize = false, Location = new Point(8, 48), Size = new Size(604, 18), TextAlign = ContentAlignment.TopLeft };
+            _lblStatus = new Label { Text = "准备就绪：点击“检查更新”", AutoSize = false, Location = new Point(8, 48), Size = new Size(604, 18), TextAlign = ContentAlignment.TopLeft };
             info.Controls.Add(_lblCurrent);
             info.Controls.Add(_lblLatest);
             info.Controls.Add(_lblStatus);
