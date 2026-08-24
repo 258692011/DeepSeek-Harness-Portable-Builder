@@ -371,10 +371,9 @@ the stage (`Copy-Tree $BuilderData $Stage\data` during assembly) — adding a
 file under `builder\data` ships it. Currently ships
 `data\dsh\skills\deepseek-harness-portable-builder\SKILL.md` (rank-400
 user-dsh discovery root; the agent can maintain its own builder from inside
-the portable) and `data\dsh\profiles\web\cordis.patch.yml` (deployment
-persona — Simplified-Chinese reply rule for every mode). The pre-archive
+the portable). The pre-archive
 probe cleanup is **whitelist-scoped** to `profiles`/`storages` only —
-preinstalled skills and profile patches survive the cleanup (earlier the
+preinstalled skills survive the cleanup (earlier the
 cleanup wiped everything under `data\dsh`).
 
 ## This skill lives in TWO places — keep them byte-identical
@@ -410,8 +409,8 @@ Extract to a fresh temp dir, then:
 4. `data\dsh\profiles\node_modules\@deepseek-ai` → ~195 junction entries (self-healed)
 5. Icon extractable from DeepSeek Harness.exe (32x32).
 6. `7za t` the zip: "Everything is Ok"; `data\dsh` contains ONLY preinstalled
-   content (`profiles\web\cordis.patch.yml` + the official scaffold files,
-   `skills\...`) — no probe-generated junction farm (`profiles\node_modules`),
+   content (`skills\...` + dsh's own web profile scaffold) — no
+   probe-generated junction farm (`profiles\node_modules`),
    no `storages`, and no `data\webview2` (test-run residue is wiped pre-archive).
 Update.exe smoke test (verify any release with these too):
 7. Launch Update.exe (plain): a window opens with 检查更新 / 立即更新 buttons

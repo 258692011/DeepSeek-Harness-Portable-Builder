@@ -96,7 +96,7 @@ DeepSeek-Harness-Portable\
 2. 运行 `DeepSeek Harness.exe`，轮询 `http://127.0.0.1:3080/` → HTTP 200；应用窗口出现（标题 "DeepSeek Harness"、左上角 DeepSeek 图标），`data\webview2\EBWebView` 生成；无浏览器进程被弹出
 3. 自愈检查：`data\dsh\profiles\node_modules\@deepseek-ai` → 约 195 个 junction 条目（启动后自动重建）
 4. 图标：可从 DeepSeek Harness.exe 提取 32x32 图标
-5. 归档校验：`7za t` → "Everything is Ok"；`data\dsh` 只含预置内容（`profiles\web\cordis.patch.yml` + 官方脚手架、`skills\`），无探针生成的 junction farm、`storages` 与 `data\webview2`（测试残留归档前整目录清除）
+5. 归档校验：`7za t` → "Everything is Ok"；`data\dsh` 只含预置内容（`skills\`、dsh 官方脚手架），无探针生成的 junction farm、`storages` 与 `data\webview2`（测试残留归档前整目录清除）
 6. Update.exe 为窗口版：其 UTF-16 字符串含 检查更新 / 立即更新 / 发现新版本（旧版 MessageBox 流程已移除）
 7. 启动 Update.exe（不带参数）约 4 秒后进程仍存活（窗口构建无崩溃），随后 taskkill /F；残留的 `.dsh-update-in-progress` 标记带 PID 校验，下次运行自动忽略
 8. 无头端到端（在便携包的副本上做，别动正式包）：复制 `app\` 到临时目录 → 删除 `node_modules\.modules.yaml` → 在副本内执行 `node\node.exe node\node_modules\pnpm\bin\pnpm.cjs add @deepseek-ai/dsh@latest --registry=https://registry.npmjs.org/ --config.node-linker=hoisted --config.dangerously-allow-all-builds --fetch-retries=5 --network-concurrency=8` → 退出码 0，package.json 依赖与 `bin.js --version` 均为 registry 最新版（如 0.1.1-rc.2），data\dsh 不受影响

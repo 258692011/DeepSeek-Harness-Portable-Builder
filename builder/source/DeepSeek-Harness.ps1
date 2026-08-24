@@ -1,4 +1,4 @@
-﻿param(
+param(
     [string]$BuilderRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path,
     [switch]$SkipArchive
 )
@@ -452,8 +452,8 @@ if (-not $SkipArchive) {
     # launcher self-heals on every start (deletes the farm + lets dsh
     # rebuild), and 7za follows the junctions into the archive. MUST run
     # BEFORE archiving. Only probe-generated entries are removed — preinstalled
-    # builder\data content (data\dsh\skills, and profiles\web\cordis.patch.yml
-    # etc.) is preserved. Remove-Item -Recurse is unreliable on junction
+    # builder\data content (data\dsh\skills, etc.) is preserved. Remove-Item
+    # -Recurse is unreliable on junction
     # trees, so use cmd rd via subst as fallback.
     $dshData = Join-Path $Stage 'data\dsh'
     if (Test-Path $dshData) {
@@ -461,8 +461,9 @@ if (-not $SkipArchive) {
             # Whitelist probe artifacts only; keep preinstalled content.
             if ($child.Name -notin @('profiles', 'storages')) { continue }
             if ($child.Name -eq 'profiles') {
-                # profiles is a hybrid: preinstalled web\ (cordis.patch.yml)
-                # must survive, only probe-generated entries are junk.
+                # profiles is a hybrid: dsh's own web profile scaffold
+                # (cordis.yml etc.) must survive, only probe-generated entries
+                # are junk.
                 foreach ($sub in (Get-ChildItem $child.FullName -Force -ErrorAction SilentlyContinue)) {
                     if ($sub.Name -eq 'web') { continue }
                     Remove-Item $sub.FullName -Recurse -Force -ErrorAction SilentlyContinue
@@ -499,7 +500,7 @@ if (-not $SkipArchive) {
                 throw "Probe-generated dsh data could not be removed: $($child.FullName)"
             }
         }
-        # profiles may keep only the preinstalled web\ patch layer.
+        # profiles may keep only dsh's own web profile scaffold.
         $profilesDir = Join-Path $dshData 'profiles'
         if (Test-Path $profilesDir) {
             foreach ($sub in (Get-ChildItem $profilesDir -Force -ErrorAction SilentlyContinue)) {
@@ -508,7 +509,7 @@ if (-not $SkipArchive) {
                 }
             }
         }
-        Write-Host 'Cleared probe-generated dsh data (profiles farm/storages); kept preinstalled skills and profile patches.'
+        Write-Host 'Cleared probe-generated dsh data (profiles farm/storages); kept preinstalled skills.'
     }
 
     # A manual launcher run in the stage (e.g. testing the WebView2 window)
