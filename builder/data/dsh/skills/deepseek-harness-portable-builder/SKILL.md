@@ -72,7 +72,7 @@ DeepSeek-Harness-Portable\
 ├── Microsoft.Web.WebView2.Core.dll / .WinForms.dll / WebView2Loader.dll  # WebView2 (Evergreen) assemblies, ~1.1 MB
 ├── node\          # portable Node v22.23.2 (zip from builder\assets\node)
 ├── app\           # @deepseek-ai/dsh installed with node-linker=hoisted (flat, symlink-free)
-├── data\dsh\      # DSH_HOME: preinstalled skills + profile patches; profiles/storages created on first run
+├── data\dsh\      # DSH_HOME: preinstalled skills; profiles/storages created on first run
 └── README.txt
 ```
 
