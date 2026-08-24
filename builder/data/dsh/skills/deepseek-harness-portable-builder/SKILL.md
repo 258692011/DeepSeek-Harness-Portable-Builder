@@ -217,12 +217,7 @@ and silently bloat the mirror again.
   `StartsWith(root + "\\")`，裸 `StartsWith(root)` 会把 `D:\portable2` 误判为
   `D:\portable` 的实例（node/launcher 都会被误杀）。启动器侧无此问题
   （精确路径比较 + 路径哈希命名）。
-- **验证 exe 内 CJK 字符串：整文件 UTF-16 解码 + Contains 会骗人（observed 2026-08-24）**:
-  .NET 元数据 #US 堆中每个字符串前是 1-2 字节变长长度前缀，部分字符串落在奇数
-  字节偏移上；把整个 exe 按 UTF-16LE 解码后用 `.Contains()` 会漏掉这些字符串
-  （误报"不存在"，而偶数偏移的能匹配上）——曾因此误判新构建的 Update.exe 缺
-  「已是最新版本」文案（假警报，构建本身正常，源码/编译/打包全对）。正确做法：
-  对目标字符串的 UTF-16LE 字节做字节级模式搜索（IndexOfBytes）。另一个坑：
+- **探针脚本必须 100% ASCII（observed 2026-08-24）**:
   本环境把无 BOM 的 .ps1 按 ANSI/GBK 解码，探针脚本里任何中文（含注释）都可能
   破坏语法（乱码字节可含 0x27）——探针脚本必须 100% ASCII，中文用码点拼
   （`[char]0xXXXX`）。
@@ -419,9 +414,8 @@ Extract to a fresh temp dir, then:
    `skills\...`) — no probe-generated junction farm (`profiles\node_modules`),
    no `storages`, and no `data\webview2` (test-run residue is wiped pre-archive).
 Update.exe smoke test (verify any release with these too):
-7. Update.exe at the portable root is the WINDOW build: its UTF-16 strings
-   contain 检查更新 / 立即更新 / 发现新版本 (window UI — the old
-   MessageBox-driven flow is gone).
+7. Launch Update.exe (plain): a window opens with 检查更新 / 立即更新 buttons
+   — confirms this is the window UI build, not the old MessageBox flow.
 8. Launch Update.exe (plain) and confirm the process is still alive after 4s
    (window constructed without crashing), then taskkill /F it. The stale
    .dsh-update-in-progress marker is PID-checked and ignored on next run.
