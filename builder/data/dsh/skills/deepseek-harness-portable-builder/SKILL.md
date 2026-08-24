@@ -52,15 +52,24 @@ How to record:
    approach, and a one-line verification note. Name real files/line numbers
    where useful.
 3. **Both copies**: this skill ships twice and MUST stay byte-identical —
-   the profile master (this file) and the 随包预置副本
-   `D:\DeepSeek-Harness-Portable-Builder\builder\data\dsh\skills\deepseek-harness-portable-builder\SKILL.md`.
-   Patch the profile copy, copy it over the preinstall copy, verify `diff`
-   reports IDENTICAL.
+   the 随包预置副本
+   `D:\DeepSeek-Harness-Portable-Builder\builder\data\dsh\skills\deepseek-harness-portable-builder\SKILL.md`
+   (the canonical editable copy, git-tracked in the builder repo) and the
+   copy shipped inside the portable (the build's `Copy-Tree` of
+   `builder\data` → `data` materializes it; also visible in
+   `stage\...\data\dsh\skills\`). Edit the builder copy; after a build,
+   verify `diff` against the stage copy reports IDENTICAL. If this skill is
+   ever installed in an agent profile (e.g. the dsh portable's own embedded
+   agent), sync that profile copy BACK to the builder copy after any patch —
+   the builder copy is canonical (observed 2026-08-24: no profile copy
+   exists on the build machine).
 4. **Scope**: record only lessons that would save time if the same mistake
    recurs (project-specific, non-trivial, cost real time). Do not record
    one-off trivia, task progress, or anything stale in a week. When unsure
    whether a lesson is worth recording, record it — a concise pitfall is
-   cheap; re-learning the mistake is not.
+   cheap; re-learning the mistake is not. When a pitfall's forensic narrative
+   (dates, symptom→root-cause chains of an already-FIXED bug) grows longer
+   than its actionable core, condense the narrative to the rule.
 5. **Report**: in the final reply, state what was added and that both copies
    are in sync.
 
@@ -90,7 +99,7 @@ DeepSeek-Harness-Portable\
 ## Build (one command)
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; & 'D:\DeepSeek-Harness-Portable-Builder\builder\source\DeepSeek-Harness.ps1' *>&1 | Tee-Object -FilePath 'D:\DeepSeek-Harness-Portable-Builder\builder\logs\build-<stamp>.log'"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; & 'D:\DeepSeek-Harness-Portable-Builder\builder\source\DeepSeek-Harness.ps1' *>&1 | Tee-Object -FilePath 'D:\DeepSeek-Harness-Portable-Builder\builder\logs\build-<stamp>.log'; if (-not $?) { Write-Host 'BUILD_FAILED (see log)'; exit 1 }; Write-Host 'BUILD_EXIT=0'; exit 0"
 ```
 
 Run in background + notify_on_complete (build ≈ 3-5 min: pnpm install ~1.5 min + archive).
@@ -376,21 +385,26 @@ probe cleanup is **whitelist-scoped** to `profiles`/`storages` only —
 preinstalled skills survive the cleanup (earlier the
 cleanup wiped everything under `data\dsh`).
 
-## This skill lives in TWO places — keep them byte-identical
+## This skill's canonical copy and shipped copy — keep them byte-identical
 
-THIS SKILL FILE has two copies and they MUST stay byte-identical:
+The canonical (editable) copy is the git-tracked
+`builder\data\dsh\skills\deepseek-harness-portable-builder\SKILL.md`; every
+edit and every 经验写回 patch goes there (observed 2026-08-24: there is NO
+profile-master copy in the active agent profile on the build machine — the
+old "profile master" wording was fiction; git history shows all edits
+landing in the builder copy).
 
-1. **profile master** (the editable one): the copy under the active agent
-   profile's skills directory — this is the file `skill_manage` writes to,
-   i.e. the very skill being read right now.
-2. **随包预置副本** (ships into the portable):
-   `D:\DeepSeek-Harness-Portable-Builder\builder\data\dsh\skills\deepseek-harness-portable-builder\SKILL.md`
+The build's `Copy-Tree` (`builder\data` → `data`) ships it into every
+portable, so the shipped copy is generated, not hand-synced. After a build,
+verify the stage copy is byte-identical: `diff` the builder copy against
+`stage\DeepSeek-Harness-Portable\data\dsh\skills\...\SKILL.md` — a divergence
+here means a build shipped stale skill text.
 
-Every edit via `skill_manage patch` only touches copy #1. **After any patch,
-copy it over the preinstall copy**: `cp <profile>/SKILL.md <builder-data>/SKILL.md`,
-then verify `diff` reports IDENTICAL (the preinstall copy silently
-diverged into a stale 153-line copy while the profile grew to 164 lines — a build
-would have shipped the old text). Rule: no patch is done until both copies match.
+If this skill is ever installed into an agent profile (e.g. the dsh
+portable's own embedded agent maintaining its builder from inside the
+portable), that profile copy is a THIRD materialization: after any patch to
+the builder copy, sync the profile copy FROM it and verify `diff` IDENTICAL.
+Rule: no patch is done until every existing copy matches.
 
 术语约定: 两份副本或本地与远端内容不一致，一律称「差异」(divergence)，
 不要用「漂移」(drift) 之类的说法。
@@ -419,26 +433,16 @@ Update.exe smoke test (verify any release with these too):
    (window constructed without crashing), then taskkill /F it. The stale
    .dsh-update-in-progress marker is PID-checked and ignored on next run.
 9. Headless end-to-end of the update command chain in a COPY of the portable
-   (never the live one): copy 
-`app\`
- to a temp dir, delete
-   
-`node_modules\.modules.yaml`
-, then in the copy run
-   
-`node\node.exe node\node_modules\pnpm\bin\pnpm.cjs add @deepseek-ai/dsh@latest
+   (never the live one): copy `app\` to a temp dir, delete
+   `node_modules\.modules.yaml`, then in the copy run
+   `node\node.exe node\node_modules\pnpm\bin\pnpm.cjs add @deepseek-ai/dsh@latest
    --registry=https://registry.npmjs.org/ --config.node-linker=hoisted
    --config.dangerously-allow-all-builds --fetch-retries=5
-   --network-concurrency=8`
- → expect exit 0, package.json dep AND
-   
-`bin.js --version`
- both equal the registry latest (e.g. 0.1.1-rc.2), and
+   --network-concurrency=8` → expect exit 0, package.json dep AND
+   `bin.js --version` both equal the registry latest (e.g. 0.1.1-rc.2), and
    data\dsh untouched.
-10. 
-`Update.exe --check`
- (tray path) opens the window and runs one check on
-   load — GUI-only; verify manually once per release.
+10. `Update.exe --check` (tray path) opens the window and runs one check on
+    load — GUI-only; verify manually once per release.
 Window behaviour (verify once per release, manually):
 11. First run: the window opens at the default size (`DeepSeek-Harness.cs`
     `Width`/`Height`). Resize the window →
