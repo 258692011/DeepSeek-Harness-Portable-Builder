@@ -576,6 +576,9 @@ internal static class Program
             if (_busy) return;
             SetBusy(true);
             SetStatus("正在检查更新...");
+            // A fresh check starts a fresh log: repeated 检查更新 clicks used
+            // to stack every check's output below the previous one (2026-08-26).
+            _txtLog.Clear();
             var worker = new System.ComponentModel.BackgroundWorker();
             worker.DoWork += (s, e) =>
             {
@@ -671,6 +674,9 @@ internal static class Program
         private void RunUpdate()
         {
             if (_busy || _latest == null) return;
+
+            // Fresh log for the update stream (same stacking fix as the check).
+            _txtLog.Clear();
 
             // Automatically stop THIS portable's own running instances first:
             // killing the launcher also removes its tray icon. Instances from
