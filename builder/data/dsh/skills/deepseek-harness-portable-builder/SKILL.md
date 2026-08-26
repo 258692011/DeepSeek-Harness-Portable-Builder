@@ -243,6 +243,13 @@ and silently bloat the mirror again.
   从未释放 `_busy`（点否后按 X 关窗会弹「更新正在进行中…确定要关闭吗？」，与 Hermes updater
   2026-08-26 同类坑）。修复：`SetBusy(false)` 移到分支之前（按钮随后显式禁用），`Close()` 移进
   `rr == DialogResult.Yes` 分支内；「否」时窗口保持打开。
+- **重复「检查更新」日志叠加（fixed 2026-08-26）**: Update.cs 的 `CheckForUpdates()`/`RunUpdate()`
+  每次都 `AppendLog` 追加输出，连点两次检查更新会把上一次的结果/输出叠在下面（用户反馈：
+  日志会叠加）。修复：每次开始新的检查/更新时先 `_txtLog.Clear()`——`CheckForUpdates` 在
+  `SetStatus("正在检查更新...")` 之后、`RunUpdate` 在 busy 守卫之后各加一行。两个方法都在
+  UI 线程执行（点击 / `BeginInvoke`），直接 Clear 无竞态：按钮 busy 期间禁用，前一轮输出在
+  完成回调（UI 线程）中已全部落盘，不存在排队中的 Append 追尾。Hermes updater 2026-08-26
+  同类修复。
 
 ## Launcher (DeepSeek-Harness.cs) contract
 
