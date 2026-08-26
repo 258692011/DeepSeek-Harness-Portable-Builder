@@ -408,6 +408,16 @@ verify the stage copy is byte-identical: `diff` the builder copy against
 `stage\DeepSeek-Harness-Portable\data\dsh\skills\...\SKILL.md` — a divergence
 here means a build shipped stale skill text.
 
+**Ordering contract: update the skill BEFORE building/packaging** (observed
+2026-08-26: a lesson was written back to the skill AFTER the ZIP was
+archived, so the shipped skill was stale). The build's `Copy-Tree` runs at
+mid-build; a skill edited after that copy never reaches the artifact unless
+you re-sync manually. Sequence for any skill change that must ship:
+(1) patch the builder copy, (2) verify the stage copy is byte-identical or
+`cp` it over, (3) only then archive. After archiving, verify the ZIP's
+extracted SKILL.md md5 equals the builder copy — do not assume the archive
+picked up the edit.
+
 If this skill is ever installed into an agent profile (e.g. the dsh
 portable's own embedded agent maintaining its builder from inside the
 portable), that profile copy is a THIRD materialization: after any patch to
