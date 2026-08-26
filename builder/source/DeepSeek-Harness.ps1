@@ -93,7 +93,11 @@ function Remove-TreeSafe([string]$Path) {
 
 function Get-FreePort {
     # Ask the OS for an unused loopback port (bind port 0). The port is
-    # released on return; a racy reuse is unlikely and the probe retries.
+    # released on return; a racy reuse is possible in theory (another process
+    # grabbing it between release and the probe's bind), but the window is
+    # milliseconds and the probe FAILS the build on bind failure — no retry
+    # loop (a rerun of the build is the recovery). Do not add retry logic
+    # here; the failure mode is loud and rare.
     $l = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, 0)
     try {
         $l.Start()
@@ -155,7 +159,11 @@ function Assert-Upstream {
     param([string]$GitExe)
     $officialRepo = 'https://github.com/deepseek-ai/deepseek-harness.git'
     if (-not (Test-Path (Join-Path $Repo '.git'))) {
-        throw "Upstream checkout missing at $Repo — run: git clone $officialRepo `"$Repo`""
+        # Shallow clone to match the mirror policy (2026-08-23): a full clone
+        # would pull ~150MB+ of history the build never needs. The sync step
+        # (fetch --depth 1 --no-tags origin master + reset --hard) keeps it
+        # shallow; a full clone would be bloated and then get pruned anyway.
+        throw "Upstream checkout missing at $Repo — run: git clone --depth 1 --no-tags --branch master $officialRepo `"$Repo`""
     }
     $dirty = & $GitExe -C $Repo status --porcelain
     if ($dirty) {

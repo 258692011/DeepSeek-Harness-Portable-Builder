@@ -230,6 +230,14 @@ and silently bloat the mirror again.
   本环境把无 BOM 的 .ps1 按 ANSI/GBK 解码，探针脚本里任何中文（含注释）都可能
   破坏语法（乱码字节可含 0x27）——探针脚本必须 100% ASCII，中文用码点拼
   （`[char]0xXXXX`）。
+- **兜底 clone 提示必须 shallow（fixed 2026-08-26）**:
+  `Assert-Upstream` 在 `upstream\` 缺失时 throw 的提示命令曾是裸
+  `git clone <official>`——全量克隆会拉下 ~150MB+ 历史（镜像策略自
+  2026-08-23 起是 depth-1 shallow，同步用 `fetch --depth 1 --no-tags
+  origin master`）。修复：提示改为 `git clone --depth 1 --no-tags
+  --branch master <official> <repo>`，与镜像策略一致。教训：任何"缺失时
+  重建"的提示/命令都必须带上与既定同步策略相同的 shallow 标志，否则会
+  静默撑大镜像。
 
 ## Launcher (DeepSeek-Harness.cs) contract
 

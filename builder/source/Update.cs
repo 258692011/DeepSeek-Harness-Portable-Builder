@@ -576,7 +576,6 @@ internal static class Program
             if (_busy) return;
             SetBusy(true);
             SetStatus("正在检查更新...");
-            AppendLog("== 检查更新 ==");
             var worker = new System.ComponentModel.BackgroundWorker();
             worker.DoWork += (s, e) =>
             {
@@ -681,7 +680,7 @@ internal static class Program
             if (StopRunningInstances())
             {
                 SetStatus("已停止本目录运行的 DeepSeek Harness（含托盘图标），开始更新...");
-                AppendLog("== 已自动停止同目录实例（DeepSeek Harness.exe / dsh web，含托盘图标）==");
+                AppendLog("已自动停止同目录实例（DeepSeek Harness.exe / dsh web，含托盘图标）");
                 System.Threading.Thread.Sleep(1500); // let file handles release
             }
 
@@ -711,7 +710,7 @@ internal static class Program
             }
 
             SetBusy(true);
-            AppendLog("== 开始更新：engine=" + (usePnpm ? "pnpm" : "npm") + " ==");
+            AppendLog("开始更新：engine=" + (usePnpm ? "pnpm" : "npm"));
             Log("installing @deepseek-ai/dsh@latest in " + _appDir);
             SetStatus("正在更新 dsh：" + _current + " → " + _latest + "（" + (usePnpm ? "pnpm" : "npm") + "）...");
 
@@ -779,7 +778,7 @@ internal static class Program
                     }
 
                     SetStatus("更新完成：" + newVer);
-                    AppendLog("== 更新完成：" + newVer + " ==");
+                    AppendLog("更新完成：" + newVer);
                     _btnCheck.Enabled = false;
                     _btnUpdate.Enabled = false;
                     // Ask before restarting: the user may be busy. On "是" the
