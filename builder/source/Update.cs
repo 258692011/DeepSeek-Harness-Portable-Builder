@@ -779,14 +779,18 @@ internal static class Program
 
                     SetStatus("更新完成：" + newVer);
                     AppendLog("更新完成：" + newVer);
-                    _btnCheck.Enabled = false;
-                    _btnUpdate.Enabled = false;
                     // Ask before restarting: the user may be busy. On "是" the
                     // launcher boots the web UI and shows the WebView2 window
                     // (waits for HTTP 200 first — no open-page race here).
                     DialogResult rr = MessageBox.Show(
                         "更新完成：" + newVer + "\n\n是否立即重启 DeepSeek Harness？",
                         "DeepSeek Harness Update", MessageBoxButtons.YesNo, MessageBoxIcon.Information);
+                    // Release the busy flag FIRST (OnFormClosing pops a busy-
+                    // confirmation whenever _busy is true), then keep the window
+                    // open on "否"; only "是" restarts the app AND closes the updater.
+                    SetBusy(false);
+                    _btnCheck.Enabled = false;
+                    _btnUpdate.Enabled = false;
                     if (rr == DialogResult.Yes)
                     {
                         try
@@ -798,8 +802,8 @@ internal static class Program
                             MessageBox.Show("更新已完成，但无法自动启动 DeepSeek Harness.exe：\n" + launchEx.Message + "\n\n请手动启动。",
                                 "DeepSeek Harness Update", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         }
+                        Close();
                     }
-                    Close();
                 }
                 catch (Exception ex) { Log("update completion handler: " + ex); }
             };
