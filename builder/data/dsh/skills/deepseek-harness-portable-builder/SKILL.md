@@ -238,6 +238,11 @@ and silently bloat the mirror again.
   --branch master <official> <repo>`，与镜像策略一致。教训：任何"缺失时
   重建"的提示/命令都必须带上与既定同步策略相同的 shallow 标志，否则会
   静默撑大镜像。
+- **更新完成「是否立即重启」对话框（fixed 2026-08-26）**: 成功路径的 `Close()` 曾**无条件执行**
+  ——点「否」也会关闭更新器窗口（用户要求：是→重启并关闭；否→保持窗口打开）。且成功路径
+  从未释放 `_busy`（点否后按 X 关窗会弹「更新正在进行中…确定要关闭吗？」，与 Hermes updater
+  2026-08-26 同类坑）。修复：`SetBusy(false)` 移到分支之前（按钮随后显式禁用），`Close()` 移进
+  `rr == DialogResult.Yes` 分支内；「否」时窗口保持打开。
 
 ## Launcher (DeepSeek-Harness.cs) contract
 
