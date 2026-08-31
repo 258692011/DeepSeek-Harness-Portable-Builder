@@ -5,6 +5,7 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 using System.Runtime.InteropServices;
@@ -23,6 +24,11 @@ internal static class Program
     private static Form _shell;
     private static WebView2 _web;
     private static bool _exiting;
+    // dsh >= 0.1.2-alpha.2 launch token (browser-session auth): dsh web prints
+    // "http://127.0.0.1:<port>/?token=<t>" on stdout and 401s unauthenticated
+    // requests; the launcher captures the token and carries it in _url.
+    private static readonly object _launchLock = new object();
+    private static string _launchToken;
 
     [STAThread]
     private static int Main()
@@ -86,21 +92,30 @@ internal static class Program
             Environment.SetEnvironmentVariable("PATH",
                 Path.Combine(_root, "node") + ";" + Environment.GetEnvironmentVariable("PATH"));
 
+            // dsh >= 0.1.2-alpha.2 gates the web UI behind a per-process
+            // launch token: dsh web prints the token URL on stdout and 401s
+            // unauthenticated root requests, so capture the token and carry it
+            // in _url. Booting with the token 303-redirects to / and mints a
+            // signed cookie, after which the session works normally.
             _child = StartDshWeb(nodeExe, dshEntry);
-
-            // Wait for the web UI to come up, then open the app window.
-            var ready = WaitForHttp(_url, TimeSpan.FromSeconds(60));
-            if (!ready && _child != null && _child.HasExited)
+            string token = WaitForLaunchToken(_child, TimeSpan.FromSeconds(20));
+            if (token == null && _child != null && _child.HasExited)
             {
                 // The chosen port lost the bind race: another copy grabbed it
                 // in the same instant (two different-path launches within
                 // milliseconds, both saw 3080 free). Retry once on a fresh
                 // OS-assigned port so the copy still comes up.
                 _port = GetFreePort();
-                _url = "http://127.0.0.1:" + _port + "/";
                 _child = StartDshWeb(nodeExe, dshEntry);
-                ready = WaitForHttp(_url, TimeSpan.FromSeconds(60));
+                token = WaitForLaunchToken(_child, TimeSpan.FromSeconds(20));
             }
+            if (token != null)
+            {
+                _url = "http://127.0.0.1:" + _port + "/?token=" + token;
+            }
+
+            // Wait for the web UI to come up, then open the app window.
+            var ready = token != null && WaitForHttp(_url, TimeSpan.FromSeconds(60));
             if (ready)
             {
                 BuildShell();
@@ -131,6 +146,9 @@ internal static class Program
     // Boot dsh web on the CURRENT _port. --no-open: upstream dsh web opens the
     // default browser itself (openBrowser defaults true); the app window is the
     // single owner of the UI, without the flag the URL would open twice.
+    // Since 0.1.2-alpha.2 dsh web prints the launch-token URL on stdout, so
+    // stdout (and stderr, to keep the pipe from filling) are redirected and
+    // the token captured via OnDshOutput.
     private static Process StartDshWeb(string nodeExe, string dshEntry)
     {
         var psi = new ProcessStartInfo
@@ -140,8 +158,44 @@ internal static class Program
             WorkingDirectory = Path.Combine(_root, "app"),
             UseShellExecute = false,
             CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
         };
-        return Process.Start(psi);
+        var p = Process.Start(psi);
+        lock (_launchLock) { _launchToken = null; }
+        p.OutputDataReceived += OnDshOutput;
+        p.ErrorDataReceived += OnDshError;
+        p.BeginOutputReadLine();
+        p.BeginErrorReadLine();
+        return p;
+    }
+
+    private static void OnDshOutput(object sender, DataReceivedEventArgs e)
+    {
+        if (string.IsNullOrEmpty(e.Data)) return;
+        var m = Regex.Match(e.Data, "[?&]token=([A-Za-z0-9_-]+)");
+        if (m.Success)
+        {
+            lock (_launchLock) { if (_launchToken == null) _launchToken = m.Groups[1].Value; }
+        }
+    }
+
+    // Drain stderr so a chatty dsh web cannot block on a full error pipe.
+    private static void OnDshError(object sender, DataReceivedEventArgs e) { }
+
+    // The launch token appears on stdout as soon as the web server binds
+    // (first run may take a few seconds of profile init). Returns null when
+    // the process exits first or the token never shows up.
+    private static string WaitForLaunchToken(Process p, TimeSpan timeout)
+    {
+        var sw = Stopwatch.StartNew();
+        while (sw.Elapsed < timeout)
+        {
+            lock (_launchLock) { if (_launchToken != null) return _launchToken; }
+            if (p.HasExited) break;
+            Thread.Sleep(100);
+        }
+        return null;
     }
 
     // ------------------------------------------------------------------
@@ -549,6 +603,10 @@ internal static class Program
             {
                 var req = (HttpWebRequest)WebRequest.Create(url);
                 req.Timeout = 3000;
+                // Carry the auth cookie: the token URL 303-redirects to / and
+                // mints a signed cookie; without a CookieContainer the follow
+                // lands on / unauthenticated and gets 401.
+                req.CookieContainer = new CookieContainer();
                 using (var resp = (HttpWebResponse)req.GetResponse()) { return true; }
             }
             catch { Thread.Sleep(500); }

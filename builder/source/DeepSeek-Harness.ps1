@@ -425,20 +425,52 @@ $oldDshHome = $env:DSH_HOME
 $env:DSH_HOME = Join-Path $Stage 'data\dsh'
 # --no-open: upstream dsh web opens the default browser itself (openBrowser
 # defaults true); the probe must never pop a browser on the build machine.
+# dsh >= 0.1.2-alpha.2 enables browser-session token auth: dsh web prints a
+# URL carrying ?token=<launch-token> on stdout and 401s every unauthenticated
+# request, so the probe MUST capture the token and carry it. With the token
+# the root URL 303-redirects to / and mints a signed cookie (following it with
+# a WebRequestSession yields HTTP 200). Redirect stdout/stderr to separate
+# temp files (Start-Process cannot use one file for both) and parse the token
+# line out of stdout.
+$probeOut = Join-Path $env:TEMP ("dsh-probe-" + [guid]::NewGuid().ToString('N') + ".out")
+$probeErr = Join-Path $env:TEMP ("dsh-probe-" + [guid]::NewGuid().ToString('N') + ".err")
 $probe = Start-Process -FilePath $nodeExe `
     -ArgumentList @($dshEntry, 'web', '--no-open', '--port', "$probePort") `
-    -WorkingDirectory (Join-Path $Stage 'app') -PassThru -WindowStyle Hidden
+    -WorkingDirectory (Join-Path $Stage 'app') -PassThru -WindowStyle Hidden `
+    -RedirectStandardOutput $probeOut -RedirectStandardError $probeErr
 try {
     $ok = $false
+    $token = $null
     for ($i = 0; $i -lt 40; $i++) {
         Start-Sleep -Milliseconds 500
         if ($probe.HasExited) { break }
-        try {
-            $resp = Invoke-WebRequest -Uri "http://127.0.0.1:$probePort/" -UseBasicParsing -TimeoutSec 3
-            if ($resp.StatusCode -eq 200) { $ok = $true; break }
-        } catch { }
+        if (-not $token) {
+            $outText = ''
+            if (Test-Path $probeOut) { $outText = Get-Content -Raw $probeOut -ErrorAction SilentlyContinue }
+            if ($outText -match 'token=([A-Za-z0-9_-]+)') { $token = $Matches[1] }
+        }
+        if ($token) {
+            try {
+                # Token exchange: ?token= -> 303 + Set-Cookie -> / with cookie -> 200.
+                $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+                $resp = Invoke-WebRequest -Uri ("http://127.0.0.1:$probePort/?token=$token") -WebSession $session -UseBasicParsing -TimeoutSec 3
+                if ($resp.StatusCode -eq 200) { $ok = $true; break }
+            } catch {
+                # Fallback: no-redirect request; accept the 303 handshake itself.
+                try {
+                    $r2 = Invoke-WebRequest -Uri ("http://127.0.0.1:$probePort/?token=$token") -UseBasicParsing -TimeoutSec 3 -MaximumRedirection 0
+                    if ($r2.StatusCode -eq 303) { $ok = $true; break }
+                } catch {
+                    if ($_.Exception.Response -and $_.Exception.Response.StatusCode -eq 303) { $ok = $true; break }
+                }
+            }
+        }
     }
-    if (-not $ok) { throw "dsh web probe failed (port $probePort)." }
+    if (-not $ok) {
+        $errText = ''
+        if (Test-Path $probeErr) { $errText = Get-Content -Raw $probeErr -ErrorAction SilentlyContinue }
+        throw "dsh web probe failed (port $probePort). stderr: $errText"
+    }
     Write-Host "dsh web probe OK (HTTP 200 on port $probePort)."
 } finally {
     $env:DSH_HOME = $oldDshHome
@@ -449,6 +481,7 @@ try {
         & taskkill.exe /PID $probe.Id /T /F 2>$null | Out-Null
         Start-Sleep -Milliseconds 500
     }
+    Remove-Item $probeOut, $probeErr -Force -ErrorAction SilentlyContinue
 }
 
 # Archive (unless skipped).
