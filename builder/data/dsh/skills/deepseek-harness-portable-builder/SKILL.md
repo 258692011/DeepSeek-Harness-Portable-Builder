@@ -7,7 +7,7 @@ license: MIT
 metadata:
   hermes:
     tags: [portable, dsh, deepseek-harness, windows, builder]
-    related_skills: [hermes-agent-portable-builder]
+    category: software-development
 ---
 
 # DeepSeek Harness Portable Builder
@@ -135,6 +135,14 @@ history reachable) → delete ALL local tags → `reflog expire --expire=now
 sync: a plain `fetch --prune origin` would fetch every branch at full depth
 and silently bloat the mirror again.
 
+## User Trigger Rules (user-controlled)
+
+同步、构建、打包、推送全部由用户明确指令触发，不从状态陈述、提问、上游提交、seed 变更或历史请求推断。当有疑问时，问。
+
+- **同步**: 用户说"同步"时执行 upstream sync（见 Sync upstream 节）。构建前的同步是流程内必做步骤，但"同步"作为独立动作也只执行于用户要求时。
+- **构建/打包**: 用户说"构建/重新构建/打包"时才启动完整构建（`DeepSeek-Harness.ps1`）。
+- **推送**: 用户**没说「推送」就不要推送到仓库**。只有用户明确说了「推送」（如完整指令「同步、构建、打包、推送」）才执行 git commit + push 到 GitHub 仓库。改完代码、构建完成、打包完成都不自动推送。
+
 ## Pitfalls
 
 - **Node version must be pinned, not "latest"**: `Resolve-Node` previously
@@ -190,6 +198,22 @@ and silently bloat the mirror again.
 - **Probe port must be dynamic**: a fixed probe port (was 34567) fails the
   build when that port is already taken on the build machine. `Get-FreePort`
   binds port 0 on loopback and uses the OS-assigned port.
+- **dsh >= 0.1.2-alpha.2 web 强制 token 认证（observed 2026-08-31）**: 上游在
+  0.1.2-alpha.2 引入 browser-session auth——`dsh web` 每次启动在 stdout 打印带
+  `?token=<launch-token>` 的 URL，根路径无 token 一律 401（`dsh web
+  authentication required`），无 `--no-auth`/`--token` 开关（token 每次随机，
+  签名 secret 持久化在 DSH_HOME credentials）。带 token 访问 `/` → 303 种签名
+  cookie（`dsh-auth-*`, 24h）→ 重定向到干净的 `/`。影响两处：
+  ① 构建探针（DeepSeek-Harness.ps1）裸请求 `http://127.0.0.1:$port/` 等 200
+  必失败——必须 `-RedirectStandardOutput` 到临时文件解析 `token=`，再带 token
+  请求（PS 5.1 用 `WebRequestSession` 跟随 303 + cookie 拿 200；fallback 用
+  `-MaximumRedirection 0` 接受 303 握手本身）；失败信息带上 stderr 便于诊断。
+  ② 启动器（DeepSeek-Harness.cs）`StartDshWeb` 加 `RedirectStandardOutput` +
+  `BeginOutputReadLine` 解析 token 拼进 `_url`；`WaitForHttp` 必须设
+  `req.CookieContainer`——否则 303 跟随到 `/` 时无 cookie → 401 永远等不到
+  ready。`IsAppUrl` 无需改（query 不影响 loopback+port 判断），WebView2 首次
+  导航带 token 自动 303 种 cookie 后回到 `/`。教训：dsh 每次发版都要把构建
+  探针/启动器与上游 web 行为对齐，不能假设「根路径 200」永远成立。
 - **`npm install` on this dep tree is pathologically slow** (dependency
   graph is huge): use pnpm (≈30s vs npm 10+ min hang). Never wait on npm.
 - `pnpm config get node-linker` returns undefined even with `.npmrc` — pass
