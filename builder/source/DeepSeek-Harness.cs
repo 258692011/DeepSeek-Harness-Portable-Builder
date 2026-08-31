@@ -216,7 +216,7 @@ internal static class Program
             // First-run default window size; the user's size is remembered in
             // data\webview2\window-state.ini and wins on later launches.
             Width = 1200,
-            Height = 860,
+            Height = 900,
             StartPosition = FormStartPosition.CenterScreen,
             // A real desktop app: minimize-to-tray instead of exiting when the
             // window is closed; the tray "退出" is the only exit path (same as
