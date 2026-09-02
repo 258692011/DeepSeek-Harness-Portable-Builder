@@ -321,6 +321,21 @@ internal static class Program
         return v.Substring(i);
     }
 
+    // npm view dist-tags --json prints one small JSON object; pull a single
+    // tag's version out without adding a JSON dependency. null when absent.
+    private static string TagVersion(string json, string tag)
+    {
+        if (string.IsNullOrEmpty(json)) return null;
+        string key = "\"" + tag + "\"";
+        int i = json.IndexOf(key, StringComparison.Ordinal);
+        if (i < 0) return null;
+        int q = json.IndexOf('"', i + key.Length);
+        if (q < 0) return null;
+        int q2 = json.IndexOf('"', q + 1);
+        if (q2 < 0) return null;
+        return json.Substring(q + 1, q2 - q - 1);
+    }
+
     private static string Tail(string text, int lines)
     {
         if (string.IsNullOrEmpty(text)) return "";
@@ -339,13 +354,7 @@ internal static class Program
     {
         try
         {
-            string tail = "";
-            if (!string.IsNullOrEmpty(output))
-            {
-                var lines = output.Split('\n');
-                int start = Math.Max(0, lines.Length - 12);
-                tail = string.Join("\n", lines, start, lines.Length - start);
-            }
+            string tail = Tail(output, 12);
             string body = "更新失败：" + step + "（退出码 " + code + "）。\n\n" + message +
                 (tail.Length > 0 ? "\n\n--- 输出 ---\n" + tail : "") +
                 "\n\n详细日志：" + diagLog;
@@ -409,7 +418,10 @@ internal static class Program
             foreach (var need in new[] { _nodeExe, _npmCli, _pkgJson })
                 if (!File.Exists(need)) _missing.Add(need);
 
-            _current = ReadCurrentVersion();
+            // pnpm writes the resolved version with a caret range (^0.1.2-alpha.4)
+            // into package.json; strip it so the UI shows a bare version like
+            // the registry's (当前版本/最新版本 compare cleanly).
+            _current = NormalizeVersion(ReadCurrentVersion());
 
             // ----- layout -----
             Text = "DeepSeek Harness Update";
@@ -583,8 +595,13 @@ internal static class Program
             worker.DoWork += (s, e) =>
             {
                 // --fetch-timeout bounds the query on slow/flaky proxy links.
+                // Query the whole dist-tags object: dsh upstream publishes the
+                // 0.1.2-alpha.x line under the "alpha" tag while the default
+                // "latest" tag stays on 0.1.1-rc.2 — resolving only "version"
+                // (= latest) would report 已是最新 forever on alpha builds
+                // (observed 2026-09-02).
                 string viewOut = RunCapture(_nodeExe,
-                    "\"" + _npmCli + "\" view \"@deepseek-ai/dsh\" version --registry https://registry.npmjs.org/ --fetch-timeout=15000 --fetch-retries=2",
+                    "\"" + _npmCli + "\" view \"@deepseek-ai/dsh\" dist-tags --json --registry https://registry.npmjs.org/ --fetch-timeout=15000 --fetch-retries=2",
                     _appDir);
                 string probe = null;
                 if (viewOut == null || viewOut.IndexOf("[stderr]") >= 0) probe = ProbeRegistry(_nodeExe, _appDir);
@@ -602,10 +619,18 @@ internal static class Program
                     {
                         int sep = viewOut.IndexOf("[stderr]");
                         string stdout = sep < 0 ? viewOut : viewOut.Substring(0, sep);
-                        foreach (var line in stdout.Split('\n'))
+                        // alpha first (the line this portable is built on),
+                        // falling back to latest when upstream drops the tag;
+                        // last resort: treat a non-JSON stdout as the version.
+                        latest = TagVersion(stdout, "alpha");
+                        if (latest == null) latest = TagVersion(stdout, "latest");
+                        if (latest == null)
                         {
-                            string t = line.Trim();
-                            if (t.Length > 0) latest = t;
+                            foreach (var line in stdout.Split('\n'))
+                            {
+                                string t = line.Trim();
+                                if (t.Length > 0) latest = t;
+                            }
                         }
                     }
                     _latest = latest;
@@ -698,12 +723,16 @@ internal static class Program
             // flaky proxy networks (UND_ERR_DESTROYED) survive.
             // --config.minimum-release-age=0: pnpm 11 blocks packages younger
             // than 1 day (minimumReleaseAge default 1440 min). A just-published
-            // dsh release makes "@latest" silently resolve to the previous
-            // version and "Done" without changing anything (hit 2026-08-22:
-            // rc.2 stayed rc.1). 0 disables the age gate.
+            // dsh release makes the tag spec silently resolve to the previous
+            // version and "Done" without changing anything (hit 2026-08-22 with
+            // "@latest": rc.2 stayed rc.1). 0 disables the age gate.
+            // Install the "alpha" tag (dist-tags.alpha) — the 0.1.2-alpha.x
+            // line this portable ships; "@latest" would pin the rc line and
+            // make 立即更新 downgrade from the alpha shown by 检查更新
+            // (observed 2026-09-02).
             string installArgs = usePnpm
-                ? "add \"@deepseek-ai/dsh@latest\" --registry=https://registry.npmjs.org/ --config.node-linker=hoisted --config.dangerously-allow-all-builds --fetch-retries=5 --network-concurrency=8 --config.minimum-release-age=0"
-                : "install \"@deepseek-ai/dsh@latest\" --registry https://registry.npmjs.org/ --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=1000";
+                ? "add \"@deepseek-ai/dsh@alpha\" --registry=https://registry.npmjs.org/ --config.node-linker=hoisted --config.dangerously-allow-all-builds --fetch-retries=5 --network-concurrency=8 --config.minimum-release-age=0"
+                : "install \"@deepseek-ai/dsh@alpha\" --registry https://registry.npmjs.org/ --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=1000";
 
             // A hoisted pnpm tree ships .modules.yaml whose storeDir /
             // virtualStoreDir record the BUILDER machine's paths; pnpm
@@ -717,7 +746,7 @@ internal static class Program
 
             SetBusy(true);
             AppendLog("开始更新：engine=" + (usePnpm ? "pnpm" : "npm"));
-            Log("installing @deepseek-ai/dsh@latest in " + _appDir);
+            Log("installing @deepseek-ai/dsh@alpha in " + _appDir);
             SetStatus("正在更新 dsh：" + _current + " → " + _latest + "（" + (usePnpm ? "pnpm" : "npm") + "）...");
 
             var sw = Stopwatch.StartNew();

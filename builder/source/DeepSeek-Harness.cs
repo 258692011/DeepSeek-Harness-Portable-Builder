@@ -207,12 +207,10 @@ internal static class Program
         // Use the DeepSeek icon embedded in this exe (/win32icon:) for the
         // title bar and taskbar — the default form icon is the generic .NET
         // one, which reads as "wrong icon".
-        System.Drawing.Icon winIcon = null;
-        try { winIcon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
         _shell = new Form
         {
             Text = "DeepSeek Harness",
-            Icon = winIcon ?? System.Drawing.SystemIcons.Application,
+            Icon = AppIcon(),
             // First-run default window size; the user's size is remembered in
             // data\webview2\window-state.ini and wins on later launches.
             Width = 1200,
@@ -443,11 +441,9 @@ internal static class Program
     {
         // Use the DeepSeek icon embedded in this exe (/win32icon:) instead of
         // the generic application icon — SystemIcons.Application shows blank.
-        System.Drawing.Icon trayIcon = null;
-        try { trayIcon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
         _tray = new NotifyIcon
         {
-            Icon = trayIcon ?? System.Drawing.SystemIcons.Application,
+            Icon = AppIcon(),
             Text = "DeepSeek Harness",
             Visible = true,
         };
@@ -544,6 +540,16 @@ internal static class Program
         }
         catch { }
         try { if (_child != null && !_child.HasExited) _child.Kill(); } catch { }
+    }
+
+    // The DeepSeek icon embedded in this exe (/win32icon:), shared by the
+    // window title bar/taskbar and the tray — SystemIcons.Application (the
+    // generic fallback) reads as "wrong icon"/blank. ExtractAssociatedIcon
+    // can throw on exotic setups; the fallback keeps the app usable.
+    private static System.Drawing.Icon AppIcon()
+    {
+        try { return System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
+        catch { return System.Drawing.SystemIcons.Application; }
     }
 
     // FNV-1a hash of the portable root (case-insensitive): stable across runs

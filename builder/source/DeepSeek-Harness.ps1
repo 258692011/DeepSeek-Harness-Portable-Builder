@@ -273,20 +273,19 @@ function Resolve-Pnpm {
 }
 
 function Build-DshPackage {
-    param([string]$WorkDir, [string]$PnpmPath)
+    param([string]$WorkDir, [string]$PnpmPath, [string]$Version)
     # Install the published @deepseek-ai/dsh package with node-linker=hoisted:
     # produces a flat, symlink-free node_modules that survives archive/restore
     # (verified 2026-08-18 — plain pnpm symlink store breaks after 7za roundtrip).
     New-Item -ItemType Directory -Force $WorkDir | Out-Null
     Copy-Item (Join-Path $SourceDir 'package.json') (Join-Path $WorkDir 'package.json') -Force
     Set-Content -Path (Join-Path $WorkDir '.npmrc') -Value 'node-linker=hoisted' -Encoding ASCII
-    $version = (Get-Content (Join-Path $Repo 'package.json') -Raw | ConvertFrom-Json).version
     $oldPath = $env:PATH
     Push-Location $WorkDir
     try {
         $env:PATH = "$(Join-Path $Stage 'node');$env:PATH"
-        Write-Host "Installing @deepseek-ai/dsh@$version (node-linker=hoisted)..."
-        Invoke-NativeChecked "pnpm add @deepseek-ai/dsh@$version (hoisted)" {
+        Write-Host "Installing @deepseek-ai/dsh@$Version (node-linker=hoisted)..."
+        Invoke-NativeChecked "pnpm add @deepseek-ai/dsh@$Version (hoisted)" {
             # Pin the official registry explicitly: a user-level npm/pnpm config
             # pointing at a mirror (e.g. npmmirror) makes the cross-platform
             # optional deps (ripgrep/koffi/sharp per-OS tarballs) fail with
@@ -331,7 +330,8 @@ Write-Host "Bundled pnpm for the updater: $($pnpmVer.Trim()) ($pnpmShips)"
 
 # Build the dsh package into a staging workdir (hoisted, flat node_modules).
 $appDir = Join-Path $Stage 'app'
-Build-DshPackage $appDir $pnpm
+$version = (Get-Content (Join-Path $Repo 'package.json') -Raw | ConvertFrom-Json).version
+Build-DshPackage $appDir $pnpm $version
 
 # Assemble the portable tree.
 $dataDir = Join-Path $Stage 'data'
@@ -389,11 +389,10 @@ Copy-Item (Join-Path $SourceDir 'README.txt') (Join-Path $Stage 'README.txt') -F
 $updateIcon = Join-Path $SourceDir 'DeepSeek-Harness.ico'
 Ensure-Utf8Bom (Join-Path $SourceDir 'Update.cs')
 Invoke-NativeChecked 'Update.exe compilation' {
-    & $csc /nologo /target:winexe /platform:anycpu /optimize+ "/win32icon:$updateIcon" "/out:$Stage\Update.exe" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll (Join-Path $SourceDir 'Update.cs')
+    & $csc /nologo /target:winexe /platform:anycpu /optimize+ "/win32icon:$updateIcon" "/out:`"$Stage\Update.exe`"" /reference:System.Windows.Forms.dll /reference:System.Drawing.dll (Join-Path $SourceDir 'Update.cs')
 }
 if (-not (Test-Path (Join-Path $Stage 'Update.exe'))) { throw 'Update.exe was not produced.' }
 
-$version = (Get-Content (Join-Path $Repo 'package.json') -Raw | ConvertFrom-Json).version
 $nodeVersion = (& (Join-Path $Stage 'node\node.exe') --version).Trim()
 $readme = [IO.File]::ReadAllText((Join-Path $SourceDir 'README.txt'), [Text.Encoding]::UTF8)
 $readme = $readme.Replace('{{DEEPSEEK_HARNESS_VERSION}}', $version).Replace('{{SOURCE_COMMIT}}', $commit).Replace('{{NODE_VERSION}}', $nodeVersion)
@@ -489,55 +488,35 @@ if (-not $SkipArchive) {
     New-Item -ItemType Directory -Force $Dist | Out-Null
 
     # The probe boot generated $Stage\data\dsh\profiles (with a node_modules
-    # symlink farm) and storages\workspace.json. None of it may ship: the
-    # launcher self-heals on every start (deletes the farm + lets dsh
-    # rebuild), and 7za follows the junctions into the archive. MUST run
-    # BEFORE archiving. Only probe-generated entries are removed — preinstalled
-    # builder\data content (data\dsh\skills, etc.) is preserved. Remove-Item
-    # -Recurse is unreliable on junction
-    # trees, so use cmd rd via subst as fallback.
+    # symlink farm), storages\workspace.json, .credentials.yaml (the token
+    # auth signing secret dsh >= 0.1.2-alpha.2 persists in DSH_HOME) and
+    # .anonymous-user-id (telemetry id). None of it may ship: the launcher
+    # self-heals on every start (deletes the farm + lets dsh rebuild), dsh
+    # recreates the credentials/id files on first run, and 7za follows the
+    # junctions into the archive. MUST run BEFORE archiving. Only
+    # probe-generated entries are removed — preinstalled builder\data content
+    # (data\dsh\skills, etc.) is preserved. Remove-Item -Recurse is
+    # unreliable on junction trees, so use cmd rd via subst as fallback.
     $dshData = Join-Path $Stage 'data\dsh'
     if (Test-Path $dshData) {
         foreach ($child in (Get-ChildItem $dshData -Force -ErrorAction SilentlyContinue)) {
             # Whitelist probe artifacts only; keep preinstalled content.
-            if ($child.Name -notin @('profiles', 'storages')) { continue }
+            if ($child.Name -notin @('profiles', 'storages', '.credentials.yaml', '.anonymous-user-id')) { continue }
             if ($child.Name -eq 'profiles') {
                 # profiles is a hybrid: dsh's own web profile scaffold
                 # (cordis.yml etc.) must survive, only probe-generated entries
                 # are junk.
                 foreach ($sub in (Get-ChildItem $child.FullName -Force -ErrorAction SilentlyContinue)) {
                     if ($sub.Name -eq 'web') { continue }
-                    Remove-Item $sub.FullName -Recurse -Force -ErrorAction SilentlyContinue
-                    if (Test-Path $sub.FullName) {
-                        # Junction tree survived Remove-Item; nuke via subst.
-                        $parent = Split-Path $sub.FullName -Parent
-                        $leaf = Split-Path $sub.FullName -Leaf
-                        foreach ($letter in 'H','G','F','I','J') {
-                            if (Test-Path "${letter}:\") { continue }
-                            subst "${letter}:" $parent | Out-Null
-                            try { cmd.exe /d /c "rd /s /q ${letter}:\$leaf" | Out-Null } finally { subst "${letter}:" /d | Out-Null }
-                            break
-                        }
-                    }
+                    Remove-TreeSafe $sub.FullName
                 }
                 continue
             }
-            Remove-Item $child.FullName -Recurse -Force -ErrorAction SilentlyContinue
-            if (Test-Path $child.FullName) {
-                # Junction tree survived Remove-Item; nuke via subst.
-                $parent = Split-Path $child.FullName -Parent
-                $leaf = Split-Path $child.FullName -Leaf
-                foreach ($letter in 'H','G','F','I','J') {
-                    if (Test-Path "${letter}:\") { continue }
-                    subst "${letter}:" $parent | Out-Null
-                    try { cmd.exe /d /c "rd /s /q ${letter}:\$leaf" | Out-Null } finally { subst "${letter}:" /d | Out-Null }
-                    break
-                }
-            }
+            Remove-TreeSafe $child.FullName
         }
         # Any remaining probe artifacts mean the cleanup failed.
         foreach ($child in (Get-ChildItem $dshData -Force -ErrorAction SilentlyContinue)) {
-            if ($child.Name -eq 'storages') {
+            if ($child.Name -in @('storages', '.credentials.yaml', '.anonymous-user-id')) {
                 throw "Probe-generated dsh data could not be removed: $($child.FullName)"
             }
         }
@@ -561,18 +540,7 @@ if (-not $SkipArchive) {
     # content lives under data\webview2, so the whole directory goes.
     $webView2Data = Join-Path $Stage 'data\webview2'
     if (Test-Path $webView2Data) {
-        Remove-Item $webView2Data -Recurse -Force -ErrorAction SilentlyContinue
-        if (Test-Path $webView2Data) {
-            # Defensive fallback (a junction would survive Remove-Item).
-            $parent = Split-Path $webView2Data -Parent
-            $leaf = Split-Path $webView2Data -Leaf
-            foreach ($letter in 'H','G','F','I','J') {
-                if (Test-Path "${letter}:\") { continue }
-                subst "${letter}:" $parent | Out-Null
-                try { cmd.exe /d /c "rd /s /q ${letter}:\$leaf" | Out-Null } finally { subst "${letter}:" /d | Out-Null }
-                break
-            }
-        }
+        Remove-TreeSafe $webView2Data
         Write-Host 'Removed test-generated data\webview2 (runtime browser profile must not ship).'
     }
 
@@ -591,31 +559,15 @@ if (-not $SkipArchive) {
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $archive = Join-Path $Dist "DeepSeek-Harness-Portable-$version-win-x64-$stamp.zip"
     Write-Host "Creating archive: $archive"
-    # 7za writes progress to stderr; under $ErrorActionPreference='Stop' that
-    # surfaces as NativeCommandError even on success. Run with EAP relaxed and
-    # judge purely by $LASTEXITCODE (same contract as Invoke-NativeChecked).
-    $oldEap = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        # Archive the stage directory itself: $Stage IS the portable root, and
-        # the zip must contain a top-level folder on extraction.
-        & $SevenZip a -tzip $archive $Stage -y | Out-Null
-        $code = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $oldEap
-    }
-    if ($code -ne 0) { throw "Archive creation failed (exit $code)." }
+    # 7za writes progress to stderr; Invoke-NativeChecked relaxes EAP and
+    # judges purely by $LASTEXITCODE (a bare & under EAP='Stop' would surface
+    # the stderr as NativeCommandError even on success).
+    # Archive the stage directory itself: $Stage IS the portable root, so the
+    # zip contains a top-level folder on extraction.
+    Invoke-NativeChecked 'Archive creation' { & $SevenZip a -tzip $archive $Stage -y | Out-Null }
     # Verify the archive is complete before declaring success (a killed 7za
     # leaves a truncated zip that passes no one).
-    $oldEap = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        & $SevenZip t $archive | Out-Null
-        $testCode = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $oldEap
-    }
-    if ($testCode -ne 0) { throw "Archive integrity check failed (exit $testCode)." }
+    Invoke-NativeChecked 'Archive integrity check' { & $SevenZip t $archive | Out-Null }
     Write-Host "Portable release built and verified: $archive"
 }
 Write-Host 'Build complete.'
