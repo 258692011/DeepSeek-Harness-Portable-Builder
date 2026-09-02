@@ -32,15 +32,11 @@ back is a lesson the next run will re-pay.
 
 Trigger: you hit an error, a wrong assumption, a failed command, a user
 correction, or a rework — AND you then found the approach that actually
-worked. Typical examples from this project: the text-edit tool rewrites .cs
-files WITHOUT the UTF-8 BOM that csc needs (re-add it before compiling;
-the build's Ensure-Utf8Bom fixes it anyway — commit the BOM'd file);
-`csc.exe` is a C# 5 compiler (no `out _` discards, no out-variable
-declarations — declare variables first); PowerShell surfaces any native
-stderr as NativeCommandError noise (judge by exit code, not the red text);
-the Windows foreground lock refuses `Activate()` when another process owns
-focus, so the second-double-click reveal needs ForceForeground
-(AttachThreadInput + SetForegroundWindow).
+worked. Typical examples: the text-edit tool rewrites .cs files WITHOUT the
+UTF-8 BOM that csc needs (the build's Ensure-Utf8Bom fixes it — commit the
+BOM'd file); csc.exe is C# 5 (no `out _` discards — declare variables
+first); PowerShell surfaces native stderr as NativeCommandError noise
+(judge by exit code, not the red text). More examples in `## Pitfalls`.
 
 How to record:
 
@@ -127,13 +123,9 @@ upstream = read-only mirror of `https://github.com/deepseek-ai/deepseek-harness.
 — a **depth-1 SHALLOW mirror since 2026-08-23** (`.git` ~150MB+ → 19MB;
 216MB → 83MB total). The build never needs history or tags — no
 `git describe`/`--tags`/`rev-list` in DeepSeek-Harness.ps1, and the version
-comes from `upstream\package.json`. Conversion recipe (verified in place):
-`fetch --depth 1 --no-tags origin master` → `reset --hard origin/master` →
-`remote remove origin` + re-add by URL (drops every origin/* ref keeping old
-history reachable) → delete ALL local tags → `reflog expire --expire=now
---all` → `gc --prune=now --aggressive`. KEEP the shallow flags on every
-sync: a plain `fetch --prune origin` would fetch every branch at full depth
-and silently bloat the mirror again.
+comes from `upstream\package.json`. KEEP the shallow flags on every sync: a
+plain `fetch --prune origin` would fetch every branch at full depth and
+silently bloat the mirror again.
 
 ## User Trigger Rules (user-controlled)
 
@@ -159,9 +151,6 @@ and silently bloat the mirror again.
   `ERR_PNPM_IGNORED_BUILDS`). First build installs the pin with the bundled
   npm and back-fills `builder\assets\pnpm\`; later builds restore from cache
   fully offline. Keep the pin in sync with README.
-- **pnpm 11 blocks dep install scripts by default** → exit 1 with
-  `ERR_PNPM_IGNORED_BUILDS` even though packages installed. MUST pass
-  `--config.dangerously-allow-all-builds` (node-pty/koffi native modules).
 - **Registry mirror breaks install**: a user-level registry (npmmirror) makes
   cross-platform optional tarballs fail with `UND_ERR_DESTROYED`. Pin
   `--registry=https://registry.npmjs.org/` explicitly in the script.
@@ -174,9 +163,10 @@ and silently bloat the mirror again.
   cannot execute. Fixed to `app\node_modules\@deepseek-ai\dsh\lib\bin.js
   --help`.
 - **7za writes progress to stderr** → under `$ErrorActionPreference='Stop'`
-  surfaces as NativeCommandError on SUCCESS. Run archive+verify with EAP
-  relaxed, judge by `$LASTEXITCODE` only; then `7za t` the archive (a killed
-  7za leaves a truncated zip that `a` reports as success).
+  it surfaces as NativeCommandError on SUCCESS. The ps1 wraps archive and
+  `7za t` in `Invoke-NativeChecked` (EAP relaxed, judged by `$LASTEXITCODE`
+  only); a killed 7za leaves a truncated zip that `a` reports as success —
+  hence the post-archive `7za t` verify step.
 - **Probe-generated `data\dsh\profiles\node_modules` is a junction farm that
   MUST NOT ship**: 7za follows junctions into the archive (400MB+ bloat; the
   extracted real tree then trips dsh's `healProfilesModuleFallback`
@@ -200,20 +190,15 @@ and silently bloat the mirror again.
   binds port 0 on loopback and uses the OS-assigned port.
 - **dsh >= 0.1.2-alpha.2 web 强制 token 认证（observed 2026-08-31）**: 上游在
   0.1.2-alpha.2 引入 browser-session auth——`dsh web` 每次启动在 stdout 打印带
-  `?token=<launch-token>` 的 URL，根路径无 token 一律 401（`dsh web
-  authentication required`），无 `--no-auth`/`--token` 开关（token 每次随机，
-  签名 secret 持久化在 DSH_HOME credentials）。带 token 访问 `/` → 303 种签名
-  cookie（`dsh-auth-*`, 24h）→ 重定向到干净的 `/`。影响两处：
-  ① 构建探针（DeepSeek-Harness.ps1）裸请求 `http://127.0.0.1:$port/` 等 200
-  必失败——必须 `-RedirectStandardOutput` 到临时文件解析 `token=`，再带 token
-  请求（PS 5.1 用 `WebRequestSession` 跟随 303 + cookie 拿 200；fallback 用
-  `-MaximumRedirection 0` 接受 303 握手本身）；失败信息带上 stderr 便于诊断。
-  ② 启动器（DeepSeek-Harness.cs）`StartDshWeb` 加 `RedirectStandardOutput` +
-  `BeginOutputReadLine` 解析 token 拼进 `_url`；`WaitForHttp` 必须设
-  `req.CookieContainer`——否则 303 跟随到 `/` 时无 cookie → 401 永远等不到
-  ready。`IsAppUrl` 无需改（query 不影响 loopback+port 判断），WebView2 首次
-  导航带 token 自动 303 种 cookie 后回到 `/`。教训：dsh 每次发版都要把构建
-  探针/启动器与上游 web 行为对齐，不能假设「根路径 200」永远成立。
+  `?token=<launch-token>` 的 URL，根路径无 token 一律 401（无
+  `--no-auth`/`--token` 开关；token 每次随机，签名 secret 持久化在 DSH_HOME
+  credentials）。带 token 访问 `/` → 303 种签名 cookie（`dsh-auth-*`, 24h）→
+  重定向到干净的 `/`。影响两处：① 构建探针（ps1）与 ② 启动器
+  （DeepSeek-Harness.cs `StartDshWeb`）都必须捕获 stdout 的 token 再请求，
+  且携带 cookie 跟随 303（ps1: `WebRequestSession`；cs: `req.CookieContainer`）
+  ——否则 303 跟随到无 cookie 的 `/` 得 401，永远等不到 ready。教训：dsh
+  每次发版都要把构建探针/启动器与上游 web 行为对齐，不能假设「根路径 200」
+  永远成立。
 - **`npm install` on this dep tree is pathologically slow** (dependency
   graph is huge): use pnpm (≈30s vs npm 10+ min hang). Never wait on npm.
 - `pnpm config get node-linker` returns undefined even with `.npmrc` — pass
@@ -222,56 +207,42 @@ and silently bloat the mirror again.
   paths** (storeDir/virtualStoreDir point into the builder's stage). pnpm
   refuses to update such a tree, so the build strips it from the zip and
   Update.exe deletes it before every install.
-- **A marquee-only progress dialog reads as "stuck"**: the old Update.exe
-  showed an indeterminate bar with zero feedback while npm ground for 6+
-  minutes. The updater now streams pnpm's live output lines + elapsed seconds
-  into the dialog and the diagnostic log.
+- **进度 UI 必须给实质反馈（fixed 2026-08-22）**: 旧版无限进度条 + 零文字，
+  在 npm 6+ 分钟安装时像死机。现改为流式输出 pnpm 实时行（日志即进度）——
+  勿倒退到 marquee-only 对话框。
 - **`dsh web` opens the default browser by itself**: upstream `web-app`
   defaults `openBrowser: true` and pops the browser on service-ready. Both the
   launcher (`DeepSeek-Harness.cs`) and the build web probe
   (`DeepSeek-Harness.ps1`) MUST pass `--no-open` — otherwise the URL opens
   twice (WebView2 window + dsh) and the build pops a browser on the build
   machine. The launcher is the single owner of the UI handoff.
-- **Two same-path instances must never share `data\webview2`**: WebView2
-  refuses a user data folder already in use by another process, so the
-  per-path named mutex (`DeepSeekHarnessPortable_Mutex_<fnv1a8>`,
-  `WaitOne(0)`, `AbandonedMutexException` → take over) is what stops a second
-  launcher of the same copy — the random-port fallback must NEVER be used for
-  the same path (would corrupt/conflict on the shared data dirs), only for
-  different-path copies. When editing the launcher keep the mutex and the
-  reveal event scoped to the path hash; the reveal event was previously the
-  global `DeepSeekHarnessPortable_Show` (pre-2026-08-23) and would have made
-  one copy's double-click raise EVERY copy's window.
-- **Update.exe 的 marker 只能由声称者删除（observed 2026-08-24）**:
-  `MainBody` 的 finally 曾无条件删除 `.dsh-update-in-progress`——更新进行中
-  打开一个 `--check` 窗口再关掉，会把正在更新的 marker 删掉，第三个
-  Update.exe 就能并发安装（两个 pnpm 写同一个 `app\`）。修复：只在
-  `markerClaimed` 时删除。同类问题：进程归属匹配必须用
-  `StartsWith(root + "\\")`，裸 `StartsWith(root)` 会把 `D:\portable2` 误判为
-  `D:\portable` 的实例（node/launcher 都会被误杀）。启动器侧无此问题
+- **同路径双实例靠 per-path mutex 阻止；随机端口只用于异路径副本**: WebView2
+  拒绝已被占用的 user data 目录，两个进程绝不可共享同一份 `data\dsh` +
+  `data\webview2`——所以同路径的第二个启动器必须被 mutex 拦下（显示已有
+  窗口后退出），绝不能落到随机端口（机制见 Launcher contract 单实例段）。
+  reveal event 曾全局命名（pre-2026-08-23），会让一份拷贝的双击唤起每份
+  拷贝的窗口——mutex/event 名必须含路径哈希（fnv1a8）。
+- **Update.exe 的 marker 只能由声称者删除（fixed 2026-08-24）**:
+  `.dsh-update-in-progress` 只在 `markerClaimed` 时删除——曾无条件删除，
+  `--check` 窗口关闭会把正在进行的更新的 marker 删掉 → 第三个 Update.exe
+  并发安装（两个 pnpm 写同一 `app\`）。
+- **进程归属匹配必须整段路径（fixed 2026-08-24）**: 用
+  `StartsWith(root + "\")`，裸 `StartsWith(root)` 会把 `D:\portable2` 误判
+  为 `D:\portable` 的实例（node/launcher 都会被误杀）。启动器侧无此问题
   （精确路径比较 + 路径哈希命名）。
 - **探针脚本必须 100% ASCII（observed 2026-08-24）**:
   本环境把无 BOM 的 .ps1 按 ANSI/GBK 解码，探针脚本里任何中文（含注释）都可能
   破坏语法（乱码字节可含 0x27）——探针脚本必须 100% ASCII，中文用码点拼
   （`[char]0xXXXX`）。
-- **兜底 clone 提示必须 shallow（fixed 2026-08-26）**:
-  `Assert-Upstream` 在 `upstream\` 缺失时 throw 的提示命令曾是裸
-  `git clone <official>`——全量克隆会拉下 ~150MB+ 历史（镜像策略自
-  2026-08-23 起是 depth-1 shallow，同步用 `fetch --depth 1 --no-tags
-  origin master`）。修复：提示改为 `git clone --depth 1 --no-tags
-  --branch master <official> <repo>`，与镜像策略一致。教训：任何"缺失时
-  重建"的提示/命令都必须带上与既定同步策略相同的 shallow 标志，否则会
-  静默撑大镜像。
-- **更新完成「是否立即重启」对话框（fixed 2026-08-26）**: 成功路径的 `Close()` 曾**无条件执行**
-  ——点「否」也会关闭更新器窗口（用户要求：是→重启并关闭；否→保持窗口打开）。且成功路径
-  从未释放 `_busy`（点否后按 X 关窗会弹「更新正在进行中…确定要关闭吗？」）。修复：`SetBusy(false)` 移到分支之前（按钮随后显式禁用），`Close()` 移进
-  `rr == DialogResult.Yes` 分支内；「否」时窗口保持打开。
-- **重复「检查更新」日志叠加（fixed 2026-08-26）**: Update.cs 的 `CheckForUpdates()`/`RunUpdate()`
-  每次都 `AppendLog` 追加输出，连点两次检查更新会把上一次的结果/输出叠在下面（用户反馈：
-  日志会叠加）。修复：每次开始新的检查/更新时先 `_txtLog.Clear()`——`CheckForUpdates` 在
-  `SetStatus("正在检查更新...")` 之后、`RunUpdate` 在 busy 守卫之后各加一行。两个方法都在
-  UI 线程执行（点击 / `BeginInvoke`），直接 Clear 无竞态：按钮 busy 期间禁用，前一轮输出在
-  完成回调（UI 线程）中已全部落盘，不存在排队中的 Append 追尾。
+- **兜底 clone 提示必须 shallow（fixed 2026-08-26）**: 任何「upstream\ 缺失
+  时重建」的提示/克隆命令必须带 `--depth 1 --no-tags --branch master`，与
+  镜像同步策略一致——裸全量 clone 会静默撑大 mirror（~150MB+）。
+- **更新完成「是否立即重启」对话框（fixed 2026-08-26）**: 成功路径先
+  `SetBusy(false)`（按钮随后禁用），`Close()` 只在 `是`（重启）分支内执行；
+  `否` 保持窗口打开。曾无条件 Close + 未释放 `_busy`。
+- **重复「检查更新」日志叠加（fixed 2026-08-26）**: 每次开始新的检查/更新
+  前先 `_txtLog.Clear()`——否则连点会把上一轮输出叠在下面。两方法都在 UI
+  线程执行（点击 / `BeginInvoke`），直接 Clear 无竞态。
 
 ## Launcher (DeepSeek-Harness.cs) contract
 
@@ -319,7 +290,7 @@ and silently bloat the mirror again.
   once from upstream `apps/web/public/favicon.svg` via sharp → PNG 256 → PIL
   multi-size ICO; the build itself never regenerates it). The build embeds it
   via `/win32icon:`; the tray and window title bar load it via
-  ExtractAssociatedIcon.
+  ExtractAssociatedIcon (the shared `AppIcon()` helper).
 
 ## In-place updater (Update.exe)
 
@@ -506,7 +477,7 @@ Update.exe smoke test (verify any release with these too):
    --config.dangerously-allow-all-builds --fetch-retries=5
    --network-concurrency=8` → expect exit 0, package.json dep AND
    `bin.js --version` both equal the registry's dist-tags.alpha (e.g.
-   0.1.2-alpha.4), and
+   0.1.2-alpha.5), and
    data\dsh untouched.
 10. `Update.exe --check` (tray path) opens the window and runs one check on
     load — GUI-only; verify manually once per release.
