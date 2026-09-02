@@ -216,9 +216,7 @@ function Resolve-Node {
     $inner = Get-ChildItem $extract -Directory | Select-Object -First 1
     if ($inner -and $inner.Name -ne 'node') {
         $hoisted = Join-Path $Stage 'node-hoist'
-        New-Item -ItemType Directory -Force $hoisted | Out-Null
-        robocopy $inner.FullName $hoisted /E /COPY:DAT /DCOPY:DAT /R:2 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
-        if ($LASTEXITCODE -ge 8) { throw "robocopy failed ($LASTEXITCODE): $($inner.FullName) -> $hoisted" }
+        Copy-Tree $inner.FullName $hoisted
         Remove-TreeSafe $extract
         Move-Item $hoisted $extract
     }
@@ -239,17 +237,26 @@ function Resolve-Pnpm {
     # Cached install: pnpm 11 ships as one self-contained package dir (all
     # deps bundled inside node_modules\pnpm — verified 2026-08-19), so copying
     # the cached package dir + shims back into the node dir is fully offline.
+    # Layout note: the node dir keeps the package at node\node_modules\pnpm,
+    # while the cache keeps it at assets\pnpm\pnpm (next to the shims) — the
+    # two layouts differ, so Sync-PnpmLayout takes explicit package paths.
+    # Both callers Remove-TreeSafe the destination package dir first, making
+    # the Copy-Item deterministic (a dir copy into an existing dir would
+    # otherwise nest a second "pnpm" level).
+    function Sync-PnpmLayout([string]$PkgFrom, [string]$PkgTo, [string]$ShimsFrom, [string]$ShimsTo) {
+        Remove-TreeSafe $PkgTo
+        Copy-Item $PkgFrom $PkgTo -Recurse -Force
+        Copy-Item (Join-Path $ShimsFrom 'pnpm.cmd') $ShimsTo -Force
+        foreach ($shim in @('pnpm.ps1', 'pnpm', 'pnpx.cmd', 'pnpx.ps1', 'pnpx')) {
+            $src = Join-Path $ShimsFrom $shim
+            if (Test-Path $src) { Copy-Item $src $ShimsTo -Force }
+        }
+    }
     $cachedPkg = Join-Path $pnpmCacheDir 'pnpm'
     $cachedCmd = Join-Path $pnpmCacheDir 'pnpm.cmd'
     if ((Test-Path $cachedPkg) -and (Test-Path $cachedCmd)) {
         Write-Host "Installing pnpm@$PnpmVersion from builder cache ($pnpmCacheDir)..."
-        if (Test-Path (Join-Path $NodeDir 'node_modules\pnpm')) { Remove-Item (Join-Path $NodeDir 'node_modules\pnpm') -Recurse -Force -ErrorAction SilentlyContinue }
-        Copy-Item $cachedPkg (Join-Path $NodeDir 'node_modules\pnpm') -Recurse -Force
-        Copy-Item $cachedCmd $NodeDir -Force
-        foreach ($shim in @('pnpm.ps1', 'pnpm', 'pnpx.cmd', 'pnpx.ps1', 'pnpx')) {
-            $src = Join-Path $pnpmCacheDir $shim
-            if (Test-Path $src) { Copy-Item $src $NodeDir -Force }
-        }
+        Sync-PnpmLayout $cachedPkg (Join-Path $NodeDir 'node_modules\pnpm') $pnpmCacheDir $NodeDir
         $globalBin = Join-Path $NodeDir 'pnpm.cmd'
         if (-not (Test-Path $globalBin)) { throw 'pnpm.cmd could not be restored from cache.' }
         return $globalBin
@@ -262,12 +269,7 @@ function Resolve-Pnpm {
     $globalBin = Join-Path $NodeDir 'pnpm.cmd'
     if (-not (Test-Path $globalBin)) { throw 'pnpm.cmd could not be resolved after global install.' }
     New-Item -ItemType Directory -Force $pnpmCacheDir | Out-Null
-    Copy-Item (Join-Path $NodeDir 'node_modules\pnpm') $pnpmCacheDir -Recurse -Force
-    Copy-Item $globalBin $pnpmCacheDir -Force
-    foreach ($shim in @('pnpm.ps1', 'pnpm', 'pnpx.cmd', 'pnpx.ps1', 'pnpx')) {
-        $src = Join-Path $NodeDir $shim
-        if (Test-Path $src) { Copy-Item $src $pnpmCacheDir -Force }
-    }
+    Sync-PnpmLayout (Join-Path $NodeDir 'node_modules\pnpm') $cachedPkg $NodeDir $pnpmCacheDir
     Write-Host "Back-filled pnpm cache: $pnpmCacheDir"
     return $globalBin
 }
@@ -338,9 +340,8 @@ $dataDir = Join-Path $Stage 'data'
 New-Item -ItemType Directory -Force (Join-Path $dataDir 'dsh') | Out-Null
 
 # Bundle every builder-managed preinstall. builder\data mirrors the deployed
-# data layout (data\dsh\skills\..., data\dsh\profiles\...), copied as-is —
-# adding any file under builder\data is enough to ship it. (Same contract as
-# the Hermes builder.)
+# data layout (data\dsh\skills\...), copied as-is — adding any file under
+# builder\data is enough to ship it.
 $builderData = Join-Path $Builder 'data'
 if (Test-Path $builderData) {
     Copy-Tree $builderData (Join-Path $Stage 'data')

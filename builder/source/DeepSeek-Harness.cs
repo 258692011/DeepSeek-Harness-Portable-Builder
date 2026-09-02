@@ -97,8 +97,7 @@ internal static class Program
             // unauthenticated root requests, so capture the token and carry it
             // in _url. Booting with the token 303-redirects to / and mints a
             // signed cookie, after which the session works normally.
-            _child = StartDshWeb(nodeExe, dshEntry);
-            string token = WaitForLaunchToken(_child, TimeSpan.FromSeconds(20));
+            string token = StartDshAndGetToken(nodeExe, dshEntry);
             if (token == null && _child != null && _child.HasExited)
             {
                 // The chosen port lost the bind race: another copy grabbed it
@@ -106,8 +105,7 @@ internal static class Program
                 // milliseconds, both saw 3080 free). Retry once on a fresh
                 // OS-assigned port so the copy still comes up.
                 _port = GetFreePort();
-                _child = StartDshWeb(nodeExe, dshEntry);
-                token = WaitForLaunchToken(_child, TimeSpan.FromSeconds(20));
+                token = StartDshAndGetToken(nodeExe, dshEntry);
             }
             if (token != null)
             {
@@ -196,6 +194,14 @@ internal static class Program
             Thread.Sleep(100);
         }
         return null;
+    }
+
+    // Boot dsh web on the CURRENT _port and wait for its launch token, as one
+    // step — the port bind-race retry in Main re-uses it verbatim.
+    private static string StartDshAndGetToken(string nodeExe, string dshEntry)
+    {
+        _child = StartDshWeb(nodeExe, dshEntry);
+        return WaitForLaunchToken(_child, TimeSpan.FromSeconds(20));
     }
 
     // ------------------------------------------------------------------

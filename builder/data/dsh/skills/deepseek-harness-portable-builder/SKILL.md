@@ -243,6 +243,15 @@ silently bloat the mirror again.
 - **重复「检查更新」日志叠加（fixed 2026-08-26）**: 每次开始新的检查/更新
   前先 `_txtLog.Clear()`——否则连点会把上一轮输出叠在下面。两方法都在 UI
   线程执行（点击 / `BeginInvoke`），直接 Clear 无竞态。
+- **pnpm 缓存与 node 目录布局不对称（observed 2026-09-03）**: 同一份 pnpm
+  安装，node 目录内是 `node\node_modules\pnpm`（包目录在 node_modules 下），
+  builder 缓存内却是 `assets\pnpm\pnpm`（包目录直接在缓存根，与 shims 平级）
+  ——回填/还原两个方向的落点形状不同。`Resolve-Pnpm` 的 `Sync-PnpmLayout`
+  辅助函数必须显式传源/目标包目录路径，且复制前先 `Remove-TreeSafe` 目标包
+  目录：`Copy-Item` 目录到已存在目录会再嵌套一层（`dest\pnpm\pnpm`），到
+  不存在的路径才生成完整拷贝。曾把目标硬编码成 `node_modules\pnpm` 写坏缓存
+  布局（回填出 `assets\pnpm\node_modules\pnpm`），每次构建都退回 npm 重装。
+  若重构该函数，用临时目录 smoke-test 两种方向后再提交。
 
 ## Launcher (DeepSeek-Harness.cs) contract
 
@@ -448,10 +457,14 @@ Rule: no patch is done until every existing copy matches.
 
 Extract to a fresh temp dir, then:
 1. `node\node.exe app\node_modules\@deepseek-ai\dsh\lib\bin.js --version` → version
-2. Run `DeepSeek Harness.exe`, poll `http://127.0.0.1:3080/` → HTTP 200; a WebView2
-   app window appears (title "DeepSeek Harness", DeepSeek icon in the title bar),
+2. Run `DeepSeek Harness.exe` → a WebView2 app window appears (title "DeepSeek
+   Harness", DeepSeek icon in the title bar) with the UI loaded,
    `data\webview2\EBWebView` is created, and NO default-browser process is
-   spawned (the launcher owns the UI handoff).
+   spawned (the launcher owns the UI handoff). Since 0.1.2-alpha.2 dsh web
+   gates `/` behind the per-boot launch token, a bare external poll of `/`
+   returns 401 (expected) — the launcher exchanges `?token=` internally, so
+   the window loading IS the HTTP-200 proof; never use "poll / → 200" as the
+   gate (that check pre-dates token auth).
 3. WebView2 assemblies ship beside the launcher: `Microsoft.Web.WebView2.Core.dll`,
    `Microsoft.Web.WebView2.WinForms.dll`, `WebView2Loader.dll` present at the
    portable root.

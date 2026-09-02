@@ -19,16 +19,9 @@ internal static class Program
     private static int Main(string[] args)
     {
         s_checkOnly = args != null && Array.IndexOf(args, "--check") >= 0;
-        Encoding originalConsole = null;
-        try { originalConsole = Console.OutputEncoding; Console.OutputEncoding = Encoding.UTF8; } catch { }
-        try
-        {
-            return MainBody();
-        }
-        finally
-        {
-            try { if (originalConsole != null) Console.OutputEncoding = originalConsole; } catch { }
-        }
+        // winexe: no console is attached, so no output-encoding setup is
+        // needed here — the UI and the diagnostic log handle encoding.
+        return MainBody();
     }
 
     private static int MainBody()
@@ -288,7 +281,7 @@ internal static class Program
     }
 
     // Turn the installer's raw failure output into a short user-facing cause
-    // (mirrors the Hermes updater's ClassifyUpdateError, adopted 2026-08-22).
+    // (install-error classification; adopted 2026-08-22).
     // Returns null when no known pattern matches (generic text is used then).
     private static string ClassifyInstallError(string output)
     {
@@ -651,9 +644,11 @@ internal static class Program
                         SetStatus("发现新版本：" + _latest + "，点击“立即更新”。");
                         AppendLog("update available: " + _current + " -> " + _latest);
                     }
-                    SetBusy(false);
                 }
                 catch (Exception ex) { Log("check completion handler: " + ex); }
+                // Always release the busy lock, even when the handler itself
+                // throws — otherwise the buttons stay disabled forever.
+                finally { SetBusy(false); }
             };
             worker.RunWorkerAsync();
         }
