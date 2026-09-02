@@ -264,16 +264,14 @@ and silently bloat the mirror again.
   静默撑大镜像。
 - **更新完成「是否立即重启」对话框（fixed 2026-08-26）**: 成功路径的 `Close()` 曾**无条件执行**
   ——点「否」也会关闭更新器窗口（用户要求：是→重启并关闭；否→保持窗口打开）。且成功路径
-  从未释放 `_busy`（点否后按 X 关窗会弹「更新正在进行中…确定要关闭吗？」，与 Hermes updater
-  2026-08-26 同类坑）。修复：`SetBusy(false)` 移到分支之前（按钮随后显式禁用），`Close()` 移进
+  从未释放 `_busy`（点否后按 X 关窗会弹「更新正在进行中…确定要关闭吗？」）。修复：`SetBusy(false)` 移到分支之前（按钮随后显式禁用），`Close()` 移进
   `rr == DialogResult.Yes` 分支内；「否」时窗口保持打开。
 - **重复「检查更新」日志叠加（fixed 2026-08-26）**: Update.cs 的 `CheckForUpdates()`/`RunUpdate()`
   每次都 `AppendLog` 追加输出，连点两次检查更新会把上一次的结果/输出叠在下面（用户反馈：
   日志会叠加）。修复：每次开始新的检查/更新时先 `_txtLog.Clear()`——`CheckForUpdates` 在
   `SetStatus("正在检查更新...")` 之后、`RunUpdate` 在 busy 守卫之后各加一行。两个方法都在
   UI 线程执行（点击 / `BeginInvoke`），直接 Clear 无竞态：按钮 busy 期间禁用，前一轮输出在
-  完成回调（UI 线程）中已全部落盘，不存在排队中的 Append 追尾。Hermes updater 2026-08-26
-  同类修复。
+  完成回调（UI 线程）中已全部落盘，不存在排队中的 Append 追尾。
 
 ## Launcher (DeepSeek-Harness.cs) contract
 
@@ -336,16 +334,17 @@ and silently bloat the mirror again.
 - Uses the **bundled pnpm** (`node\node_modules\pnpm\bin\pnpm.cjs` — ships in
   every build; ~30s installs vs npm's 10+ min hang on the huge dsh dep tree).
   Falls back to the bundled npm only when pnpm is missing (very old portables).
-- Check (`npm view @deepseek-ai/dsh version` with `--fetch-timeout=15000
-  --fetch-retries=2`) renders in the window: 发现新版本 / 已是最新版本 /
+- Check (`npm view @deepseek-ai/dsh dist-tags --json` with `--fetch-timeout=15000
+  --fetch-retries=2`, resolving the **`alpha` tag first**, falling back to
+  `latest` only when upstream drops the tag) renders in the window: 发现新版本 / 已是最新版本 /
   无法查询 registry(离线或代理异常)。The update runs inside the same window:
-  `pnpm add @deepseek-ai/dsh@latest --registry=https://registry.npmjs.org/
+  `pnpm add @deepseek-ai/dsh@alpha --registry=https://registry.npmjs.org/
   --config.node-linker=hoisted --config.dangerously-allow-all-builds
   --fetch-retries=5 --network-concurrency=8 --config.minimum-release-age=0` (npm fallback: `npm install ...
   --no-audit --no-fund --fetch-retries=5`) with a live streaming log box
   (real-time output; the log IS the progress view, no marquee bar); verifies via `bin.js --version`; **on success asks 是否立即重启 (MessageBox Yes/No) — relaunches DeepSeek Harness.exe on 是, and the launcher then shows the WebView2 window**; user data `data\dsh`
   untouched.
-- **pnpm blocks fresh releases (minimumReleaseAge)**: pnpm 11's supply-chain policy refuses packages younger than 1 day (default `minimum-release-age=1440`). A just-published dsh makes `pnpm add @deepseek-ai/dsh@latest` silently resolve @latest to the previous version and print "Done" without changing anything (rc.2 stayed rc.1, version guard fired 更新失败). Both the build and Update.exe pass `--config.minimum-release-age=0`.
+- **pnpm blocks fresh releases (minimumReleaseAge)**: pnpm 11's supply-chain policy refuses packages younger than 1 day (default `minimum-release-age=1440`). A just-published dsh makes the tag spec silently resolve to the previous version and print "Done" without changing anything (hit 2026-08-22 with `@latest`: rc.2 stayed rc.1, version guard fired 更新失败). Both the build and Update.exe pass `--config.minimum-release-age=0`.
 - **pnpm prints "Done" but can linger**: the pnpm process tree may keep running after "Done in Xs using pnpm" (post-run network chatter / a lingering child — Update.exe waited forever on a flaky proxy). The updater detects the "Done in ... using pnpm" marker, kills the tree immediately (no grace) once the marker is seen — pnpm normally exits ~0.1s after Done, but may linger forever; so the instant it has not exited after Done, it is killed, and then kills the whole tree (taskkill /T /F) and proceeds — the `bin.js --version` check is the real gate. No hard timeout is needed: the stream either exits normally, hits a non-zero exit (shown as 更新失败), or is grace-killed after the marker (the post-install `bin.js --version` check is the gate).
 - **Pre-flight network probe + failure classification**: before the install,
   Update.exe probes registry.npmjs.org through the SAME bundled node the
@@ -353,12 +352,11 @@ and silently bloat the mirror again.
   misjudges this machine's TLS path). A dead/flaky link fails in
   seconds with a clear reason (超时/DNS/拒绝/代理) instead of minutes of pnpm
   retries. Install/check failures are classified from the raw output (网络 /
-  DNS / 403 权限) into user-facing causes, mirroring the Hermes updater's
-  ClassifyUpdateError.
+  DNS / 403 权限) into user-facing causes.
 - **`add`, never `install`**: `pnpm install <spec>` silently reinstalls the
   existing spec and leaves the tree at the old version — the
-  updater uses `pnpm add`. A post-install version check against the registry's
-  "latest" fails loudly if the tree did not actually change.
+  updater uses `pnpm add`. A post-install version check against the resolved
+  registry version (dist-tags.alpha) fails loudly if the tree did not actually change.
 - **Stale `.modules.yaml` blocks pnpm**: the hoisted tree ships
   `app\node_modules\.modules.yaml` whose storeDir/virtualStoreDir record the
   BUILDER machine's paths; pnpm refuses to work on it ("dependencies are
@@ -379,6 +377,15 @@ and silently bloat the mirror again.
   npm exits non-zero (e.g. offline); the version parse cuts at that marker so
   an error message is never offered as "latest". Offline
   still shows 无法查询 registry in the window.
+- **`latest` tag ≠ the alpha line (observed 2026-09-02)**: dsh upstream
+  publishes the 0.1.2-alpha.x series under the `alpha` dist-tag while `latest`
+  (and `next`) stay on 0.1.1-rc.2 — `npm view @deepseek-ai/dsh version`
+  resolves `latest` only, so on an alpha-built portable 检查更新 reported
+  已是最新 forever and 立即更新 would have moved the tree BACK onto the rc
+  line. Update.exe now queries `dist-tags --json`, resolves **alpha first →
+  latest fallback → last-stdout-line fallback**, and installs
+  `@deepseek-ai/dsh@alpha`. Builder builds are unaffected (they pin the exact
+  version from upstream package.json, never a tag).
 - Re-entrancy marker `data\dsh\.dsh-update-in-progress` (PID, stale-safe; `--check` never claims it — read-only, so tray checks work while the window is open);
   automatically stops this portable's own launcher/web processes before updating (taskkill /T /F — the tray icon disappears with the launcher); instances from other directories are never touched; diagnostic log
   `data\dsh\logs\Update-exe-diagnostic.log`.
@@ -425,7 +432,10 @@ file under `builder\data` ships it. Currently ships
 `data\dsh\skills\deepseek-harness-portable-builder\SKILL.md` (rank-400
 user-dsh discovery root; the agent can maintain its own builder from inside
 the portable). The pre-archive
-probe cleanup is **whitelist-scoped** to `profiles`/`storages` only —
+probe cleanup is **whitelist-scoped** to probe artifacts only
+(`profiles`/`storages`/`.credentials.yaml`/`.anonymous-user-id` — the last
+two are dsh's token-auth signing secret and telemetry id, both written by
+the probe boot and both recreated by dsh on first run) —
 preinstalled skills survive the cleanup (earlier the
 cleanup wiped everything under `data\dsh`).
 
@@ -479,7 +489,9 @@ Extract to a fresh temp dir, then:
 6. `7za t` the zip: "Everything is Ok"; `data\dsh` contains ONLY preinstalled
    content (`skills\...` + dsh's own web profile scaffold) — no
    probe-generated junction farm (`profiles\node_modules`),
-   no `storages`, and no `data\webview2` (test-run residue is wiped pre-archive).
+   no `storages`, no `.credentials.yaml` / `.anonymous-user-id` (probe
+   runtime secrets — these shipped before the 2026-09-02 cleanup fix), and
+   no `data\webview2` (test-run residue is wiped pre-archive).
 Update.exe smoke test (verify any release with these too):
 7. Launch Update.exe (plain): a window opens with 检查更新 / 立即更新 buttons
    — confirms this is the window UI build, not the old MessageBox flow.
@@ -489,11 +501,12 @@ Update.exe smoke test (verify any release with these too):
 9. Headless end-to-end of the update command chain in a COPY of the portable
    (never the live one): copy `app\` to a temp dir, delete
    `node_modules\.modules.yaml`, then in the copy run
-   `node\node.exe node\node_modules\pnpm\bin\pnpm.cjs add @deepseek-ai/dsh@latest
+   `node\node.exe node\node_modules\pnpm\bin\pnpm.cjs add @deepseek-ai/dsh@alpha
    --registry=https://registry.npmjs.org/ --config.node-linker=hoisted
    --config.dangerously-allow-all-builds --fetch-retries=5
    --network-concurrency=8` → expect exit 0, package.json dep AND
-   `bin.js --version` both equal the registry latest (e.g. 0.1.1-rc.2), and
+   `bin.js --version` both equal the registry's dist-tags.alpha (e.g.
+   0.1.2-alpha.4), and
    data\dsh untouched.
 10. `Update.exe --check` (tray path) opens the window and runs one check on
     load — GUI-only; verify manually once per release.
