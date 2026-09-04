@@ -49,7 +49,7 @@ How to record:
    chapter, and the GitHub Release section.
 2. **What**: symptom (exact error/behavior), root cause, the proven correct
    approach, and a one-line verification note. Name real files/line numbers
-   where useful.
+   where useful. 行文措辞遵守「术语约定」段（见文末）。
 3. **Both copies**: this skill ships twice and MUST stay byte-identical —
    the 随包预置副本
    `D:\DeepSeek-Harness-Portable-Builder\builder\data\dsh\skills\deepseek-harness-portable-builder\SKILL.md`
@@ -510,7 +510,10 @@ the builder copy, sync the profile copy FROM it and verify `diff` IDENTICAL.
 Rule: no patch is done until every existing copy matches.
 
 术语约定: 两份副本或本地与远端内容不一致，一律称「差异」(divergence)，
-不要用「漂移」(drift) 之类的说法。
+不要用「漂移」(drift) 之类的说法。正文一律写**完整明确的名称**（技能名/
+仓库路径/文件/组件名），**禁止口语化即席指代**（如「…侧」「那边」这类
+未定义说法；observed 2026-09-04：「deepseek 侧」曾写进技能正文、难以理解，
+已全部改为完整名称并全文清零）。
 
 ## Verify a release
 
