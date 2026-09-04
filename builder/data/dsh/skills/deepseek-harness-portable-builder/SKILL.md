@@ -40,10 +40,13 @@ first); PowerShell surfaces native stderr as NativeCommandError noise
 
 How to record:
 
-1. **Where**: add a dated pitfall (`observed YYYY-MM-DD`) to the `## Pitfalls`
-   section of this SKILL.md. If it is a launcher/updater detail, also touch
-   the matching contract section. Update this section with a short pointer
-   line when the detail lives elsewhere.
+1. **Where**: put the lesson where the next reader will look — dated entries
+   (`observed YYYY-MM-DD`) in `## Pitfalls` for cross-cutting traps, and
+   inside the matching contract/flow section for component rules (launcher
+   contract, Update.exe section, GitHub Release 发布, copy-sync/ordering
+   chapter). Placement follows practice, not a single list: the 2026-09-04
+   entries live in `## Pitfalls`, the Update.exe section, the canonical-copy
+   chapter, and the GitHub Release section.
 2. **What**: symptom (exact error/behavior), root cause, the proven correct
    approach, and a one-line verification note. Name real files/line numbers
    where useful.
@@ -54,11 +57,12 @@ How to record:
    copy shipped inside the portable (the build's `Copy-Tree` of
    `builder\data` → `data` materializes it; also visible in
    `stage\...\data\dsh\skills\`). Edit the builder copy; after a build,
-   verify `diff` against the stage copy reports IDENTICAL. If this skill is
-   ever installed in an agent profile (e.g. the dsh portable's own embedded
-   agent), sync that profile copy BACK to the builder copy after any patch —
-   the builder copy is canonical (observed 2026-08-24: no profile copy
-   exists on the build machine).
+   verify `diff` against the stage copy reports IDENTICAL. If an agent
+   profile holds a copy (this machine has one at
+   `C:\DeepSeek-Harness-Portable\data\dsh\skills\...` — the copy the running
+   agent loads; observed 2026-08-24 said none existed then, but it does since
+   at least 2026-09-04), sync it FROM the builder copy after every patch and
+   verify byte-identical — the builder copy is canonical.
 4. **Scope**: record only lessons that would save time if the same mistake
    recurs (project-specific, non-trivial, cost real time). Do not record
    one-off trivia, task progress, or anything stale in a week. When unsure
@@ -66,8 +70,12 @@ How to record:
    cheap; re-learning the mistake is not. When a pitfall's forensic narrative
    (dates, symptom→root-cause chains of an already-FIXED bug) grows longer
    than its actionable core, condense the narrative to the rule.
-5. **Report**: in the final reply, state what was added and that both copies
-   are in sync.
+5. **Report**: in the final reply, state what was added and that all existing
+   copies (builder / agent profile / stage) are byte-identical.
+6. **Ship**: a skill edit that must reach the portable ships by copying the
+   builder copy into the stage and re-archiving — NEVER a full rebuild (see
+   the copy-sync chapter「Skill-only changes need NO full rebuild」for the
+   exact steps and the dirty-stage caveat).
 
 Portable layout (what ships):
 
@@ -135,6 +143,14 @@ silently bloat the mirror again.
 - **同步**: 用户说"同步"时执行 upstream sync（见 Sync upstream 节）。构建前的同步是流程内必做步骤，但"同步"作为独立动作也只执行于用户要求时。
 - **构建/打包**: 用户说"构建/重新构建/打包"时才启动完整构建（`DeepSeek-Harness.ps1`）。
 - **推送**: 用户**没说「推送」就不要推送到仓库**。只有用户明确说了「推送」（如完整指令「同步、构建、打包、推送」）才执行 git commit + push 到 GitHub 仓库。改完代码、构建完成、打包完成都不自动推送。
+- **发布**: 用户说「发布」时才执行 GitHub Release（`gh release create v<dsh版本> <dist zip> ...`，见下节）。发布不等于推送——两者独立，都需用户明确指令。
+
+## GitHub Release 发布 (gh)
+
+- tag 惯例 `v<dsh 版本>`（如 v0.1.2-rc.1），标题 `DeepSeek Harness Portable v<版本>`，全部打 `--prerelease`（产品仍在 RC 阶段，既有 release 都是 Pre-release）；zip 在 `dist\`（gitignore，不进仓库），发布时由 gh 上传，`--target main`
+- notes 参照既有 release（如 v0.1.2-alpha.5）的格式：开头一句总述（基于上游 deepseek-ai/deepseek-harness `@deepseek-ai/dsh@<版本>` 打包）→ `## 内容` → `## 文件校验`（文件名/大小字节/SHA-256）→ `## 更新日志（日期）` → `## 使用`；SHA-256 用 `Get-FileHash -Algorithm SHA256` 本地算（与 GitHub 资产 digest 一致）
+- **~105MB 资产上传可能超前台命令超时（observed 2026-09-04）**：被杀的 `gh release create` 会留下一个 **untagged Draft**（URL 呈 `untagged-…`，远端无 tag）。恢复：`gh release delete <tag> --yes` 删草稿后重发，重发务必用**后台任务**跑（无超时上限），完成后 `gh release view --json assets,isDraft` 验证
+- notes 文件用 write 工具写纯文本（勿经 PowerShell here-string——反引号转义坑见 Pitfalls 2026-09-04），上传前数 NUL 字节；改 notes 用 `gh release edit --notes-file`；验后用 `gh api ... --jq '.body'` 落盘通读一遍
 
 ## Pitfalls
 
@@ -231,7 +247,7 @@ silently bloat the mirror again.
   并发安装（两个 pnpm 写同一 `app\`）。
 - **进程归属匹配必须整段路径（fixed 2026-08-24）**: 用
   `StartsWith(root + "\")`，裸 `StartsWith(root)` 会把 `D:\portable2` 误判
-  为 `D:\portable` 的实例（node/launcher 都会被误杀）。启动器侧无此问题
+  为 `D:\portable` 的实例（node/launcher 都会被误杀）。启动器没有此问题
   （精确路径比较 + 路径哈希命名）。
 - **探针脚本必须 100% ASCII（observed 2026-08-24）**:
   本环境把无 BOM 的 .ps1 按 ANSI/GBK 解码，探针脚本里任何中文（含注释）都可能
@@ -472,6 +488,20 @@ you re-sync manually. Sequence for any skill change that must ship:
 `cp` it over, (3) only then archive. After archiving, verify the ZIP's
 extracted SKILL.md md5 equals the builder copy — do not assume the archive
 picked up the edit.
+
+**Skill-only changes need NO full rebuild — copy into the stage and
+re-archive (observed 2026-09-04)**: a change touching only skill/docs text
+ships by copying the builder copy into the stage
+(`Copy-Item` the file, or re-run `Copy-Tree builder\data stage\data`) and
+re-running ONLY the archive step on the existing clean stage:
+`& builder\assets\7zip\7za.exe a -tzip <dist>\DeepSeek-Harness-Portable-<version>-win-x64-<stamp>.zip <stage>\DeepSeek-Harness-Portable -y`
+(archive the stage dir itself so the zip keeps its top-level folder), then
+`7za t`. A full rebuild (upstream/node/pnpm/csc/web probe) is pointless churn
+for a text change — it was done once for a skill-only edit and wasted ~3 min.
+Full rebuild only when code, upstream, or the runtime changed. Caution: only
+safe when the stage is already the clean post-build tree (probe data cleared,
+`.modules.yaml` stripped, data\dsh preinstalled-only); never hand-archive a
+dirty stage.
 
 If this skill is ever installed into an agent profile (e.g. the dsh
 portable's own embedded agent maintaining its builder from inside the
