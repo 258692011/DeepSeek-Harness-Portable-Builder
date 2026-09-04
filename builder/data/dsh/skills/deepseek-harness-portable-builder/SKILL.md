@@ -237,6 +237,13 @@ silently bloat the mirror again.
   本环境把无 BOM 的 .ps1 按 ANSI/GBK 解码，探针脚本里任何中文（含注释）都可能
   破坏语法（乱码字节可含 0x27）——探针脚本必须 100% ASCII，中文用码点拼
   （`[char]0xXXXX`）。
+- **PowerShell 双引号 here-string 会吞反引号（observed 2026-09-04）**:
+  用 `@"..."@` 拼 Markdown 发布说明再 `gh release edit --notes-file` 时，
+  反引号是 PS 转义符——`` `0.1.2-rc.1` `` 里的 `` `0 `` 变成 NUL（GitHub 页
+  显示 `^@`）、其余反引号被吞，上传的 notes 静默损坏（两轮才发现）。发布说明
+  一律用 write 工具写纯文本文件（不做任何 PS 字符串处理），上传前先数 NUL
+  字节（`[IO.File]::ReadAllBytes` 中 `0x00` 计数）再 `gh release edit`。
+  验证：`gh api ... --jq '.body'` 落盘后通读一遍。
 - **兜底 clone 提示必须 shallow（fixed 2026-08-26）**: 任何「upstream\ 缺失
   时重建」的提示/克隆命令必须带 `--depth 1 --no-tags --branch master`，与
   镜像同步策略一致——裸全量 clone 会静默撑大 mirror（~150MB+）。
