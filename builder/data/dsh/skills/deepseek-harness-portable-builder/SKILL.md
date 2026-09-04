@@ -151,6 +151,7 @@ silently bloat the mirror again.
 - notes 参照既有 release（如 v0.1.2-alpha.5）的格式：开头一句总述（基于上游 deepseek-ai/deepseek-harness `@deepseek-ai/dsh@<版本>` 打包）→ `## 内容` → `## 文件校验`（文件名/大小字节/SHA-256）→ `## 更新日志（日期）` → `## 使用`；SHA-256 用 `Get-FileHash -Algorithm SHA256` 本地算（与 GitHub 资产 digest 一致）
 - **~105MB 资产上传可能超前台命令超时（observed 2026-09-04）**：被杀的 `gh release create` 会留下一个 **untagged Draft**（URL 呈 `untagged-…`，远端无 tag）。恢复：`gh release delete <tag> --yes` 删草稿后重发，重发务必用**后台任务**跑（无超时上限），完成后 `gh release view --json assets,isDraft` 验证
 - notes 文件用 write 工具写纯文本（勿经 PowerShell here-string——反引号转义坑见 Pitfalls 2026-09-04），上传前数 NUL 字节；改 notes 用 `gh release edit --notes-file`；验后用 `gh api ... --jq '.body'` 落盘通读一遍
+- **gh api 输出是行数组，勿直接喂字符串替换（observed 2026-09-04）**：`gh api --jq '.body'` 在 PowerShell 返回 string[]（每行一个元素），直接传给 `[regex]::Replace`/`.Replace` 会被**空格拼成单行**——release 正文所有换行消失、Markdown 标题/列表变一堵墙（rc.1 说明曾中招，正文从 27 行塌成 1 行）。程序化改 body 前先按换行符 join 还原成单个字符串；更稳：整写 notes 文件再 `--notes-file`，不做程序化 body 编辑。
 
 ## Pitfalls
 
