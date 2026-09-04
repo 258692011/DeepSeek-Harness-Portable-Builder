@@ -314,19 +314,125 @@ internal static class Program
         return v.Substring(i);
     }
 
-    // npm view dist-tags --json prints one small JSON object; pull a single
-    // tag's version out without adding a JSON dependency. null when absent.
-    private static string TagVersion(string json, string tag)
+    // npm view dist-tags --json prints one small flat JSON object
+    // ({"tag":"version", ...}). Walk every "key": "value" pair and keep the
+    // highest version — no hardcoded tag priority, so a stale leftover tag
+    // (upstream promoted 0.1.2 to rc under "latest"/"next" but never deleted
+    // the frozen "alpha" tag; observed 2026-09-04) can never pin the updater
+    // below the true newest release. null when no parseable pair exists.
+    private static string ResolveNewestDistTag(string json)
     {
         if (string.IsNullOrEmpty(json)) return null;
-        string key = "\"" + tag + "\"";
-        int i = json.IndexOf(key, StringComparison.Ordinal);
-        if (i < 0) return null;
-        int q = json.IndexOf('"', i + key.Length);
-        if (q < 0) return null;
-        int q2 = json.IndexOf('"', q + 1);
-        if (q2 < 0) return null;
-        return json.Substring(q + 1, q2 - q - 1);
+        string best = null;
+        int pos = 0;
+        while (true)
+        {
+            int q1 = json.IndexOf('"', pos);
+            if (q1 < 0) break;
+            int q2 = json.IndexOf('"', q1 + 1);
+            if (q2 < 0) break;
+            int colon = json.IndexOf(':', q2 + 1);
+            if (colon < 0) break;
+            int q3 = json.IndexOf('"', colon + 1);
+            if (q3 < 0) break;
+            int q4 = json.IndexOf('"', q3 + 1);
+            if (q4 < 0) break;
+            string tag = json.Substring(q1 + 1, q2 - q1 - 1);
+            string ver = json.Substring(q3 + 1, q4 - q3 - 1);
+            if (tag.Length > 0 && ver.Length > 0 && CompareVersions(ver, best) > 0) best = ver;
+            pos = q4 + 1;
+        }
+        return best;
+    }
+
+    // Prerelease-aware semver comparison (C# 5: no tuples, no out vars).
+    // Returns -1/0/1; a null version sorts below any real version. Semver
+    // 2.0.0 ordering: "1.0.0" > "1.0.0-rc.1" > "1.0.0-alpha.5", and
+    // "0.1.2-alpha.5" > "0.1.1-rc.2" (core parts dominate prerelease tags).
+    private static int CompareVersions(string a, string b)
+    {
+        string[] pa = VersionParts(a);
+        string[] pb = VersionParts(b);
+        if (pa == null && pb == null) return 0;
+        if (pa == null) return -1;
+        if (pb == null) return 1;
+        int c = CompareCore(pa[0], pb[0]);
+        if (c != 0) return c;
+        string preA = pa.Length > 1 ? pa[1] : "";
+        string preB = pb.Length > 1 ? pb[1] : "";
+        if (preA.Length == 0 && preB.Length == 0) return 0;
+        if (preA.Length == 0) return 1; // release > prerelease of same core
+        if (preB.Length == 0) return -1;
+        string[] ia = preA.Split('.');
+        string[] ib = preB.Split('.');
+        int n = ia.Length < ib.Length ? ia.Length : ib.Length;
+        for (int i = 0; i < n; i++)
+        {
+            int d = CompareIdentifier(ia[i], ib[i]);
+            if (d != 0) return d;
+        }
+        return ia.Length < ib.Length ? -1 : (ia.Length > ib.Length ? 1 : 0);
+    }
+
+    // "M.m.p[-pre]" -> [core, prerelease]; null when not semver-shaped.
+    private static string[] VersionParts(string v)
+    {
+        if (string.IsNullOrEmpty(v)) return null;
+        string t = v.Trim();
+        int dash = t.IndexOf('-');
+        string core = dash < 0 ? t : t.Substring(0, dash);
+        string pre = dash < 0 ? "" : t.Substring(dash + 1);
+        string[] segs = core.Split('.');
+        if (segs.Length != 3) return null;
+        for (int i = 0; i < 3; i++)
+        {
+            if (segs[i].Length == 0) return null;
+            foreach (char ch in segs[i]) if (ch < '0' || ch > '9') return null;
+        }
+        return dash < 0 ? new string[] { core } : new string[] { core, pre };
+    }
+
+    private static int CompareCore(string a, string b)
+    {
+        string[] sa = a.Split('.');
+        string[] sb = b.Split('.');
+        for (int i = 0; i < 3; i++)
+        {
+            long x, y;
+            if (!long.TryParse(sa[i], out x) || !long.TryParse(sb[i], out y))
+            {
+                int d = string.CompareOrdinal(sa[i], sb[i]);
+                if (d != 0) return d < 0 ? -1 : 1;
+                continue;
+            }
+            if (x != y) return x < y ? -1 : 1;
+        }
+        return 0;
+    }
+
+    private static bool IsNumericIdent(string s)
+    {
+        if (s.Length == 0) return false;
+        foreach (char ch in s) if (ch < '0' || ch > '9') return false;
+        return true;
+    }
+
+    private static int CompareIdentifier(string a, string b)
+    {
+        bool na = IsNumericIdent(a);
+        bool nb = IsNumericIdent(b);
+        if (na && nb)
+        {
+            string xa = a.TrimStart('0'); if (xa.Length == 0) xa = "0";
+            string xb = b.TrimStart('0'); if (xb.Length == 0) xb = "0";
+            if (xa.Length != xb.Length) return xa.Length < xb.Length ? -1 : 1;
+            int d = string.CompareOrdinal(xa, xb);
+            return d < 0 ? -1 : (d > 0 ? 1 : 0);
+        }
+        if (na) return -1; // numeric identifiers sort before alphanumeric ones
+        if (nb) return 1;
+        int dc = string.CompareOrdinal(a, b);
+        return dc < 0 ? -1 : (dc > 0 ? 1 : 0);
     }
 
     private static string Tail(string text, int lines)
@@ -572,7 +678,7 @@ internal static class Program
         {
             _busy = busy;
             _btnCheck.Enabled = !busy && _markerOk && _missing.Count == 0;
-            _btnUpdate.Enabled = !busy && _markerOk && _missing.Count == 0 && _latest != null && !string.Equals(NormalizeVersion(_current), NormalizeVersion(_latest), StringComparison.OrdinalIgnoreCase);
+            _btnUpdate.Enabled = !busy && _markerOk && _missing.Count == 0 && _latest != null && CompareVersions(NormalizeVersion(_current), _latest) < 0;
         }
 
         // ---------------------------------------------------------- check
@@ -588,11 +694,12 @@ internal static class Program
             worker.DoWork += (s, e) =>
             {
                 // --fetch-timeout bounds the query on slow/flaky proxy links.
-                // Query the whole dist-tags object: dsh upstream publishes the
-                // 0.1.2-alpha.x line under the "alpha" tag while the default
-                // "latest" tag stays on 0.1.1-rc.2 — resolving only "version"
-                // (= latest) would report 已是最新 forever on alpha builds
-                // (observed 2026-09-02).
+                // Query the whole dist-tags object and take the NEWEST version
+                // across all tags: the tag a release line ships under changes
+                // (0.1.2-alpha.x was under "alpha"; 0.1.2-rc.1 sits under
+                // "latest"/"next" while "alpha" stays frozen on the last
+                // alpha — observed 2026-09-04). Resolving a
+                // single hardcoded tag misreports 已是最新 forever.
                 string viewOut = RunCapture(_nodeExe,
                     "\"" + _npmCli + "\" view \"@deepseek-ai/dsh\" dist-tags --json --registry https://registry.npmjs.org/ --fetch-timeout=15000 --fetch-retries=2",
                     _appDir);
@@ -612,11 +719,8 @@ internal static class Program
                     {
                         int sep = viewOut.IndexOf("[stderr]");
                         string stdout = sep < 0 ? viewOut : viewOut.Substring(0, sep);
-                        // alpha first (the line this portable is built on),
-                        // falling back to latest when upstream drops the tag;
-                        // last resort: treat a non-JSON stdout as the version.
-                        latest = TagVersion(stdout, "alpha");
-                        if (latest == null) latest = TagVersion(stdout, "latest");
+                        // Last resort: treat a non-JSON stdout as the version.
+                        latest = ResolveNewestDistTag(stdout);
                         if (latest == null)
                         {
                             foreach (var line in stdout.Split('\n'))
@@ -632,11 +736,11 @@ internal static class Program
                         SetStatus("无法查询 npm registry。" + (probe != null ? "\n" + probe : "") + "请稍后重试。");
                         AppendLog("check failed: " + (viewOut ?? "(null)"));
                     }
-                    else if (string.Equals(NormalizeVersion(_current), NormalizeVersion(_latest), StringComparison.OrdinalIgnoreCase))
+                    else if (CompareVersions(NormalizeVersion(_current), _latest) >= 0)
                     {
                         _lblLatest.Text = "最新版本：" + _latest;
                         SetStatus("已是最新版本");
-                        AppendLog("already latest: " + _latest);
+                        AppendLog("already latest: current " + _current + " / registry-newest " + _latest);
                     }
                     else
                     {
@@ -721,13 +825,15 @@ internal static class Program
             // dsh release makes the tag spec silently resolve to the previous
             // version and "Done" without changing anything (hit 2026-08-22 with
             // "@latest": rc.2 stayed rc.1). 0 disables the age gate.
-            // Install the "alpha" tag (dist-tags.alpha) — the 0.1.2-alpha.x
-            // line this portable ships; "@latest" would pin the rc line and
-            // make 立即更新 downgrade from the alpha shown by 检查更新
-            // (observed 2026-09-02).
+            // Install the EXACT version 检查更新 resolved, never a literal tag:
+            // _latest is the newest across dist-tags — since 0.1.2-rc.1 that is
+            // the "latest" tag, while "alpha" is frozen on the last alpha.5;
+            // installing "@alpha" would leave the tree unchanged and trip the
+            // post-install version gate (observed 2026-09-04).
+            string spec = "@deepseek-ai/dsh@" + _latest;
             string installArgs = usePnpm
-                ? "add \"@deepseek-ai/dsh@alpha\" --registry=https://registry.npmjs.org/ --config.node-linker=hoisted --config.dangerously-allow-all-builds --fetch-retries=5 --network-concurrency=8 --config.minimum-release-age=0"
-                : "install \"@deepseek-ai/dsh@alpha\" --registry https://registry.npmjs.org/ --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=1000";
+                ? "add \"" + spec + "\" --registry=https://registry.npmjs.org/ --config.node-linker=hoisted --config.dangerously-allow-all-builds --fetch-retries=5 --network-concurrency=8 --config.minimum-release-age=0"
+                : "install \"" + spec + "\" --registry https://registry.npmjs.org/ --no-audit --no-fund --fetch-retries=5 --fetch-retry-mintimeout=1000";
 
             // A hoisted pnpm tree ships .modules.yaml whose storeDir /
             // virtualStoreDir record the BUILDER machine's paths; pnpm
@@ -741,7 +847,7 @@ internal static class Program
 
             SetBusy(true);
             AppendLog("开始更新：engine=" + (usePnpm ? "pnpm" : "npm"));
-            Log("installing @deepseek-ai/dsh@alpha in " + _appDir);
+            Log("installing " + spec + " in " + _appDir);
             SetStatus("正在更新 dsh：" + _current + " → " + _latest + "（" + (usePnpm ? "pnpm" : "npm") + "）...");
 
             var sw = Stopwatch.StartNew();

@@ -107,7 +107,8 @@ allow-builds) → compile DeepSeek Harness.exe + Update.exe (csc winexe + icon;
 UTF-8 BOM enforced on both .cs via Ensure-Utf8Bom; bundled pnpm.cjs ship is
 asserted — the updater depends on it) → README
 version injection → `dsh --version` via **node + lib\bin.js** (never the .cmd
-shim) → **web probe (HTTP 200, dynamically allocated port)** →
+shim; **must equal the upstream version** — post-install gate added 2026-09-04)
+→ **web probe (HTTP 200, dynamically allocated port)** →
 **clear probe-generated data\dsh** → strip builder-path
 app\node_modules\.modules.yaml (pnpm would refuse it) → 7za archive → `7za t`
 verify.
@@ -153,7 +154,9 @@ silently bloat the mirror again.
   fully offline. Keep the pin in sync with README.
 - **Registry mirror breaks install**: a user-level registry (npmmirror) makes
   cross-platform optional tarballs fail with `UND_ERR_DESTROYED`. Pin
-  `--registry=https://registry.npmjs.org/` explicitly in the script.
+  `--registry=https://registry.npmjs.org/` explicitly in the script —
+  including the first-run `npm install -g pnpm` fallback inside Resolve-Pnpm
+  (that call was unpinned until 2026-09-04).
 - **node.exe cannot run `.cmd` shims**: dsh.cmd is a cmd wrapper — launch
   `app\node_modules\@deepseek-ai\dsh\lib\bin.js` directly (both in the build
   probe/version check and in DeepSeek-Harness.cs). The build now runs
@@ -315,10 +318,13 @@ silently bloat the mirror again.
   every build; ~30s installs vs npm's 10+ min hang on the huge dsh dep tree).
   Falls back to the bundled npm only when pnpm is missing (very old portables).
 - Check (`npm view @deepseek-ai/dsh dist-tags --json` with `--fetch-timeout=15000
-  --fetch-retries=2`, resolving the **`alpha` tag first**, falling back to
-  `latest` only when upstream drops the tag) renders in the window: 发现新版本 / 已是最新版本 /
+  --fetch-retries=2`, resolving the **newest version across ALL dist-tags** —
+  prerelease-aware semver max, no hardcoded tag priority: the tag a release
+  line ships under changes (0.1.2-alpha.x was on `alpha`; 0.1.2-rc.1 is on
+  `latest`/`next` with `alpha` frozen at the last alpha — pitfall 2026-09-04)
+  renders in the window: 发现新版本 / 已是最新版本 /
   无法查询 registry(离线或代理异常)。The update runs inside the same window:
-  `pnpm add @deepseek-ai/dsh@alpha --registry=https://registry.npmjs.org/
+  `pnpm add @deepseek-ai/dsh@<resolved-version> --registry=https://registry.npmjs.org/
   --config.node-linker=hoisted --config.dangerously-allow-all-builds
   --fetch-retries=5 --network-concurrency=8 --config.minimum-release-age=0` (npm fallback: `npm install ...
   --no-audit --no-fund --fetch-retries=5`) with a live streaming log box
@@ -336,7 +342,7 @@ silently bloat the mirror again.
 - **`add`, never `install`**: `pnpm install <spec>` silently reinstalls the
   existing spec and leaves the tree at the old version — the
   updater uses `pnpm add`. A post-install version check against the resolved
-  registry version (dist-tags.alpha) fails loudly if the tree did not actually change.
+  newest-across-tags version fails loudly if the tree did not actually change.
 - **Stale `.modules.yaml` blocks pnpm**: the hoisted tree ships
   `app\node_modules\.modules.yaml` whose storeDir/virtualStoreDir record the
   BUILDER machine's paths; pnpm refuses to work on it ("dependencies are
@@ -362,10 +368,26 @@ silently bloat the mirror again.
   (and `next`) stay on 0.1.1-rc.2 — `npm view @deepseek-ai/dsh version`
   resolves `latest` only, so on an alpha-built portable 检查更新 reported
   已是最新 forever and 立即更新 would have moved the tree BACK onto the rc
-  line. Update.exe now queries `dist-tags --json`, resolves **alpha first →
-  latest fallback → last-stdout-line fallback**, and installs
-  `@deepseek-ai/dsh@alpha`. Builder builds are unaffected (they pin the exact
+  line. Fix (since 2026-09-04): Update.exe queries `dist-tags --json` and
+  resolves the **newest across ALL tags** with a semver compare — see the
+  2026-09-04 pitfall below. Builder builds are unaffected (they pin the exact
   version from upstream package.json, never a tag).
+- **Hardcoding any one dist-tag goes stale when upstream moves the line
+  (observed 2026-09-04)**: the 2026-09-02 fix made Update.exe resolve the
+  `alpha` tag FIRST — correct only while the active dev line was 0.1.2-alpha.x
+  and `latest` was frozen on the old 0.1.1-rc.2. When upstream promoted 0.1.2
+  to rc.1 under `latest`/`next` it did NOT delete the `alpha` tag (still
+  0.1.2-alpha.5), so every alpha-built portable reported 已是最新 forever and
+  could never see 0.1.2-rc.1 — npm tags are never auto-removed, so any
+  fixed-tag priority is a time bomb. Update.cs now walks every pair in
+  `dist-tags --json` and keeps the highest (prerelease-aware semver:
+  0.1.2-rc.1 > 0.1.2-alpha.5, and 0.1.2-alpha.5 > 0.1.1-rc.2 so the 09-02 era
+  still resolves correctly); 立即更新 enables only when resolved > installed
+  (a plain != branch would OFFER A DOWNGRADE labelled 发现新版本 once installed
+  exceeded the resolved tag); and it installs the exact resolved version
+  (`pnpm add @deepseek-ai/dsh@0.1.2-rc.1`), never a literal tag — `@alpha`
+  would install the frozen alpha.5 and trip the post-install version gate.
+  Verified: 13-assertion compile-time unit check over both eras' dist-tags.
 - Re-entrancy marker `data\dsh\.dsh-update-in-progress` (PID, stale-safe; `--check` never claims it — read-only, so tray checks work while the window is open);
   automatically stops this portable's own launcher/web processes before updating (taskkill /T /F — the tray icon disappears with the launcher); instances from other directories are never touched; diagnostic log
   `data\dsh\logs\Update-exe-diagnostic.log`.
@@ -484,12 +506,13 @@ Update.exe smoke test (verify any release with these too):
    .dsh-update-in-progress marker is PID-checked and ignored on next run.
 9. Headless end-to-end of the update command chain in a COPY of the portable
    (never the live one): copy `app\` to a temp dir, delete
-   `node_modules\.modules.yaml`, then in the copy run
-   `node\node.exe node\node_modules\pnpm\bin\pnpm.cjs add @deepseek-ai/dsh@alpha
+   `node_modules\.modules.yaml`, then in the copy run the exact spec Update.exe
+   resolved for this release — `node\node.exe node\node_modules\pnpm\bin\pnpm.cjs add @deepseek-ai/dsh@<version>
    --registry=https://registry.npmjs.org/ --config.node-linker=hoisted
    --config.dangerously-allow-all-builds --fetch-retries=5
    --network-concurrency=8` → expect exit 0, package.json dep AND
-   `bin.js --version` both equal the registry's dist-tags.alpha (e.g.
+   `bin.js --version` both equal the NEWEST version across the registry's
+   dist-tags (e.g. 0.1.2-rc.1 while the `alpha` tag stays frozen at
    0.1.2-alpha.5), and
    data\dsh untouched.
 10. `Update.exe --check` (tray path) opens the window and runs one check on

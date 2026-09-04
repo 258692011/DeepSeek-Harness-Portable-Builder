@@ -264,7 +264,9 @@ function Resolve-Pnpm {
     # Fresh install with the bundled npm, then back-fill the cache so later
     # builds (and offline builders) never need the network again.
     Write-Host "Installing pnpm@$PnpmVersion with the bundled npm (first run; cached afterwards)..."
-    & $npmCmd install -g "pnpm@$PnpmVersion" --no-fund --no-audit --silent | Out-Null
+    # Pin the official registry here too — a user-level mirror (npmmirror)
+    # breaks installs the same way it breaks the pnpm add below (2026-09-04).
+    & $npmCmd install -g "pnpm@$PnpmVersion" --registry=https://registry.npmjs.org/ --no-fund --no-audit --silent | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "npm install -g pnpm@$PnpmVersion failed (exit $LASTEXITCODE)." }
     $globalBin = Join-Path $NodeDir 'pnpm.cmd'
     if (-not (Test-Path $globalBin)) { throw 'pnpm.cmd could not be resolved after global install.' }
@@ -410,7 +412,12 @@ $env:DSH_HOME = Join-Path $Stage 'data\dsh'
 try {
     $dshVersion = Invoke-NativeChecked 'dsh --version' { & $nodeExe $dshEntry --version }
     if (-not $dshVersion) { throw 'dsh --version returned nothing.' }
+    $dshVersion = (($dshVersion) -join "`n").Trim()
     Write-Host "dsh version: $dshVersion"
+    # Post-install version gate (same contract as Update.exe): pnpm add with an
+    # exact spec is deterministic, but a silent resolution mismatch (registry
+    # or tag oddity) must fail the build, never ship the wrong dsh.
+    if ($dshVersion -ne $version) { throw "dsh --version mismatch: installed $dshVersion, expected $version" }
 } finally {
     $env:DSH_HOME = $oldDshHome
 }

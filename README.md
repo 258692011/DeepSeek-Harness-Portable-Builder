@@ -32,7 +32,7 @@ DeepSeek-Harness-Portable-Builder\
 | .NET Framework C# 编译器 | v4.0（Windows 10/11 自带） | 是 | 使用 `Framework64\v4.0.30319\csc.exe` 编译 `DeepSeek Harness.exe` 启动器 |
 | 7za.exe（7-Zip 命令行版） | 固定 26.02 | 否 | 使用 builder\assets\7zip\7za.exe 压缩，缺失时联网下载恢复（下载后回填 assets 缓存） |
 
-版本规则：Node 固定 v22.23.2（满足 dsh `engines.node` `^22.19.0 || >=24.0.0`）；pnpm 固定 11.21.0（脚本 `$PnpmVersion`，v11 才支持 `--config.dangerously-allow-all-builds`）；Git 固定 2.55.0.3（脚本 `$gitTag`/`$gitVer`，自带 PortableGit 离线缓存，不再依赖系统 git）；dsh 版本跟随 `upstream\package.json` 的 `version` 字段（构建前同步 upstream 取最新；自 2026-09-03 起处于 `0.1.2-alpha.x` 线）。
+版本规则：Node 固定 v22.23.2（满足 dsh `engines.node` `^22.19.0 || >=24.0.0`）；pnpm 固定 11.21.0（脚本 `$PnpmVersion`，v11 才支持 `--config.dangerously-allow-all-builds`）；Git 固定 2.55.0.3（脚本 `$gitTag`/`$gitVer`，自带 PortableGit 离线缓存，不再依赖系统 git）；dsh 版本跟随 `upstream\package.json` 的 `version` 字段（构建前同步 upstream 取最新；当前为 `0.1.2-rc.1` 线，构建后 `dsh --version` 必须与该字段一致，否则构建失败）。
 
 ## 构建
 
@@ -99,7 +99,7 @@ DeepSeek-Harness-Portable\
 5. 归档校验：`7za t` → "Everything is Ok"；`data\dsh` 只含预置内容（`skills\`、dsh 官方脚手架），无探针生成的 junction farm、`storages` 与 `data\webview2`（测试残留归档前整目录清除）
 6. Update.exe 为窗口版：其 UTF-16 字符串含 检查更新 / 立即更新 / 发现新版本（旧版 MessageBox 流程已移除）
 7. 启动 Update.exe（不带参数）约 4 秒后进程仍存活（窗口构建无崩溃），随后 taskkill /F；残留的 `.dsh-update-in-progress` 标记带 PID 校验，下次运行自动忽略
-8. 无头端到端（在便携包的副本上做，别动正式包）：复制 `app\` 到临时目录 → 删除 `node_modules\.modules.yaml` → 在副本内执行 `node\node.exe node\node_modules\pnpm\bin\pnpm.cjs add @deepseek-ai/dsh@alpha --registry=https://registry.npmjs.org/ --config.node-linker=hoisted --config.dangerously-allow-all-builds --fetch-retries=5 --network-concurrency=8` → 退出码 0，package.json 依赖与 `bin.js --version` 均等于 registry 的 dist-tags.alpha（如 0.1.2-alpha.5，2026-09-02 起更新器/文档走 alpha 线，勿用 @latest——那是 rc 线），data\dsh 不受影响
+8. 无头端到端（在便携包的副本上做，别动正式包）：复制 `app\` 到临时目录 → 删除 `node_modules\.modules.yaml` → 在副本内执行 `node\node.exe node\node_modules\pnpm\bin\pnpm.cjs add @deepseek-ai/dsh@<版本号> --registry=https://registry.npmjs.org/ --config.node-linker=hoisted --config.dangerously-allow-all-builds --fetch-retries=5 --network-concurrency=8`（`<版本号>` 取 registry `dist-tags --json` 中语义化版本最高的那个，当前为 0.1.2-rc.1；勿用 @alpha——该标签自 2026-09-03 起冻结在 0.1.2-alpha.5）→ 退出码 0，package.json 依赖与 `bin.js --version` 均等于该版本，data\dsh 不受影响
 9. `Update.exe --check`（托盘路径）打开窗口并自动检查一次——GUI 操作，每个版本人工验证一次
 10. 多实例（2026-08-24 起行为）：解压两份副本到不同目录分别启动 → 第一份占 3080，第二份自动用随机端口，两者同时 HTTP 200 且端口不同；同路径再次双击不新增进程（只唤起窗口）。详见技能验证清单第 13 步
 
@@ -111,7 +111,7 @@ dsh 是 RC 阶段、破坏性变更频繁。升级分两种情况：
 双击包根目录的 `Update.exe` 打开更新窗口:
 - 窗口显示 当前版本 / 最新版本 / 状态;点击"检查更新"查询 registry(启动时不做任何自动检查)
 - 更新前先用包内 node 探测 registry.npmjs.org 连通性(6 秒超时),网络/代理不通秒级报原因,不用干等 pnpm 重试;失败输出自动分类(网络/DNS/权限)
-- 发现新版本后点击"立即更新":包内 pnpm(`pnpm add @deepseek-ai/dsh@alpha`——跟随 0.1.2-alpha.x 线,与 Update.exe/检查更新一致,勿用 @latest 否则会退回 rc 线;带重试/降并发参数,代理不稳也能扛;`--config.minimum-release-age=0` 关闭 pnpm 的"新包需满 1 天"策略,否则刚发布的版本会被静默解析回旧版)→ 窗口内实时日志(无进度条,日志即进度)→ 弹框确认是否立即重启(是=重启并打开应用窗口)(pnpm 打印 `Done in` 后进程可能赖着不退,更新器检测到完成标记后若进程未退出立即杀进程树(实测 Done 后通常 0.1s 自然退出;无需硬超时,失败由退出码/版本校验兜底))
+- 发现新版本后点击"立即更新":包内 pnpm(安装**检查更新解析出的精确版本** `@deepseek-ai/dsh@<版本号>`,如 0.1.2-rc.1——解析规则是取 registry 全部 dist-tags(alpha/latest/next…)中语义化版本最高者,不写死任一标签:0.1.2-alpha.x 曾走 alpha 标签,0.1.2-rc.1 起上游把 latest/next 指向 rc 线而 alpha 标签冻结在最后的 0.1.2-alpha.5,2026-09-04 起更新器不再 alpha 优先;带重试/降并发参数,代理不稳也能扛;`--config.minimum-release-age=0` 关闭 pnpm 的"新包需满 1 天"策略,否则刚发布的版本会被静默解析回旧版)→ 窗口内实时日志(无进度条,日志即进度)→ 弹框确认是否立即重启(是=重启并打开应用窗口)(pnpm 打印 `Done in` 后进程可能赖着不退,更新器检测到完成标记后若进程未退出立即杀进程树(实测 Done 后通常 0.1s 自然退出;无需硬超时,失败由退出码/版本校验兜底))
 - 只动 `app\node_modules`(含 pnpm-lock.yaml),用户数据 `data\dsh\` 原样保留
 - 点击"立即更新"自动停止本目录运行的 DeepSeek Harness.exe / node 进程(杀进程树,托盘图标随之消失),其他目录的实例不触碰;无需手动退出
 - 失败在窗口内显示(日志: `data\dsh\logs\Update-exe-diagnostic.log`)
