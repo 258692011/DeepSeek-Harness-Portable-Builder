@@ -560,10 +560,11 @@ Update.exe smoke test (verify any release with these too):
     load — GUI-only; verify manually once per release.
 Window behaviour (verify once per release, manually):
 11. First run: the window opens at the default size (`DeepSeek-Harness.cs`
-    `Width`/`Height`). Resize the window → the size is saved live (Resize
-    handler, debounced ~300ms — no exit needed; minimized/maximized bounds
-    are never recorded) → close (hide to tray) → relaunch from tray 打开界面
-    → the size is restored from `data\webview2\window-state.ini`.
+    `Width`/`Height`). Resize the window → the size is saved when the drag
+    ends (ResizeEnd, single fire — no exit needed, no debounce timer;
+    minimized/maximized bounds are never recorded) → close (hide to tray) →
+    relaunch from tray 打开界面 → the size is restored from
+    `data\webview2\window-state.ini`.
 12. A second double-click of `DeepSeek Harness.exe` while running only
     re-shows the existing window (single-instance reveal) AND brings it to the
     foreground (ForceForeground), no second process.

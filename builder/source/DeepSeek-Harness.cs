@@ -24,9 +24,6 @@ internal static class Program
     private static Form _shell;
     private static WebView2 _web;
     private static bool _exiting;
-    // Window-size persistence is debounced: a resize (drag) schedules a save
-    // ~300ms after the user stops, instead of only writing on hide/exit.
-    private static System.Windows.Forms.Timer _sizeSaveTimer;
     // dsh >= 0.1.2-alpha.2 launch token (browser-session auth): dsh web prints
     // "http://127.0.0.1:<port>/?token=<t>" on stdout and 401s unauthenticated
     // requests; the launcher captures the token and carries it in _url.
@@ -237,13 +234,10 @@ internal static class Program
         _shell.Controls.Add(_web);
         RestoreWindowState();
         // Persist the size as the user resizes (drag), not only on exit:
-        // debounced ~300ms after the window goes quiet. Resize also fires on
-        // minimize — ScheduleSaveWindowState skips that, and SaveWindowState
-        // guards non-Normal bounds as well.
-        _shell.Resize += (s, e) =>
-        {
-            if (_shell.WindowState != FormWindowState.Minimized) ScheduleSaveWindowState();
-        };
+        // ResizeEnd fires ONCE when the drag ends — no debounce timer, no
+        // resize-event storm. Minimize/maximize don't raise it as a drag end;
+        // the Normal guard inside SaveWindowState is the final filter.
+        _shell.ResizeEnd += (s, e) => { SaveWindowState(); };
 
         _shell.FormClosing += (s, e) =>
         {
@@ -434,26 +428,8 @@ internal static class Program
         catch { /* first run / unreadable state — keep the default size */ }
     }
 
-    // Debounced resize persistence: every resize restarts the timer; only once
-    // the window has been quiet for Interval ms is the size actually written
-    // (a drag fires Resize continuously, so a raw handler would hammer disk).
-    private static void ScheduleSaveWindowState()
-    {
-        if (_sizeSaveTimer == null)
-        {
-            _sizeSaveTimer = new System.Windows.Forms.Timer { Interval = 300 };
-            _sizeSaveTimer.Tick += (s, e) =>
-            {
-                _sizeSaveTimer.Stop();
-                SaveWindowState();
-            };
-        }
-        _sizeSaveTimer.Stop();
-        _sizeSaveTimer.Start();
-    }
-
-    // Persist the current window size — debounced on every resize, plus a
-    // final flush on hide-to-tray and on shutdown.
+    // Persist the current window size — fired by ResizeEnd when the user
+    // stops dragging, plus a final flush on hide-to-tray and on shutdown.
     private static void SaveWindowState()
     {
         try
