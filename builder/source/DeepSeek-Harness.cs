@@ -233,10 +233,10 @@ internal static class Program
         _web = new WebView2 { Dock = DockStyle.Fill };
         _shell.Controls.Add(_web);
         RestoreWindowState();
-        // Persist the size as the user resizes (drag), not only on exit:
-        // ResizeEnd fires ONCE when the drag ends — no debounce timer, no
-        // resize-event storm. Minimize/maximize don't raise it as a drag end;
-        // the Normal guard inside SaveWindowState is the final filter.
+        // Persist the size as the user resizes (drag): ResizeEnd fires ONCE
+        // when the drag ends — no debounce timer, no resize-event storm.
+        // Minimize/maximize don't raise it as a drag end; the Normal guard
+        // inside SaveWindowState is the final filter.
         _shell.ResizeEnd += (s, e) => { SaveWindowState(); };
 
         _shell.FormClosing += (s, e) =>
@@ -245,7 +245,6 @@ internal static class Program
             // The only exit is the tray menu (or the explicit Shutdown).
             if (!_exiting)
             {
-                SaveWindowState();
                 e.Cancel = true;
                 _shell.Hide();
             }
@@ -429,7 +428,7 @@ internal static class Program
     }
 
     // Persist the current window size — fired by ResizeEnd when the user
-    // stops dragging, plus a final flush on hide-to-tray and on shutdown.
+    // stops dragging.
     private static void SaveWindowState()
     {
         try
@@ -525,7 +524,6 @@ internal static class Program
     private static void Shutdown()
     {
         _exiting = true;
-        SaveWindowState(); // the window may never have been closed (hide-to-tray)
         try { if (_tray != null) _tray.Visible = false; } catch { }
         Application.Exit();
     }
